@@ -1,3 +1,5 @@
-﻿Console.WriteLine("start");
+﻿using mingpt;
 
-Word2Vec.run ();
+Console.WriteLine("start");
+
+MinGPT1Test.Main ();
