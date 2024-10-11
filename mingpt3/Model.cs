@@ -3,7 +3,7 @@ namespace mingpt3;
 /**
  * https://chatgpt.com/share/67084674-24ec-8009-b7e1-6e45002c5f96
  */
-public class GPTModel
+public class Model
 {
     public int VocabSize, EmbeddingSize, NumHeads, NumLayers, MaxSeqLen;
     public EmbeddingLayer TokenEmbedding;
@@ -11,7 +11,7 @@ public class GPTModel
     public TransformerBlock[] Layers;
     public LinearLayer FinalLayer;
 
-    public GPTModel (int vocabSize, int embeddingSize, int numHeads, int numLayers, int maxSeqLen) {
+    public Model (int vocabSize, int embeddingSize, int numHeads, int numLayers, int maxSeqLen) {
         VocabSize = vocabSize;
         EmbeddingSize = embeddingSize;
         NumHeads = numHeads;

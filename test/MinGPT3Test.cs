@@ -13,7 +13,7 @@ public class MinGPT3Test
 
         var data = DataLoader.LoadData (maxSeqLen, out var vocabSize, out var vocabulary);
 
-        var model = new GPTModel (vocabSize, embeddingSize, numHeads, numLayers, maxSeqLen);
+        var model = new Model (vocabSize, embeddingSize, numHeads, numLayers, maxSeqLen);
         var optimizer = new Optimizer (learningRate: 0.0005);
 
         for (int epoch = 0; epoch < 1000; epoch++) {
@@ -84,7 +84,7 @@ public class MinGPT3Test
         return totalLoss;
     }
 
-    static string predict (GPTModel model, char[] vocabulary, string prompt, int generatedLength) {
+    static string predict (Model model, char[] vocabulary, string prompt, int generatedLength) {
         int[] seedInput = DataLoader.encode (prompt, vocabulary);
 
         var generatedTokens = new List<int> (seedInput);

@@ -8,7 +8,7 @@ public class Optimizer
         LearningRate = learningRate;
     }
 
-    public void Step (GPTModel model) {
+    public void Step (Model model) {
         // Update token embeddings
         model.TokenEmbedding.Weights -= LearningRate * model.TokenEmbedding.GradWeights;
         model.TokenEmbedding.GradWeights.Clear ();
