@@ -16,7 +16,9 @@ static class Trainer
             foreach (var input in batchInputIds) {
                 var logitsBatch = model.Forward (input);
 
-                totalLoss += CrossEntropyLoss.ComputeLoss (logitsBatch, input, out var dLogitsBatch) / batchSize;
+                var dLogitsBatch = CrossEntropyLoss.ComputeLoss (logitsBatch, input, out var loss);
+
+                totalLoss += loss / batchSize;
 
                 model.Backward (dLogitsBatch, input);
             }

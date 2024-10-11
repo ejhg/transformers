@@ -31,11 +31,7 @@ class MinGPT4Test
             // Forward pass
             Matrix logits = model.Forward (inputTokens);
 
-            // Compute loss
-            double loss = CrossEntropyLoss.ComputeLoss (logits, targetTokens);
-
-            // Backward pass
-            Matrix gradLoss = CrossEntropyLoss.Backward (logits, targetTokens);
+            mingpt3.CrossEntropyLoss.ComputeLoss (new mingpt3.Matrix (logits.Data), targetTokens, out var loss);
 
             // Update parameters
             model.UpdateParameters (learningRate);

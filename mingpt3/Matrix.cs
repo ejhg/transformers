@@ -11,6 +11,10 @@ public class Matrix
         Data = new double[rows, cols];
     }
 
+    public Matrix (double[][] data) {
+        throw new NotImplementedException ();
+    }
+
     public static Matrix Random (int rows, int cols) {
         var m = new Matrix (rows, cols);
         var rand = new Random ();
