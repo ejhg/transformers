@@ -1,9 +1,11 @@
+using mingpt5;
+
 namespace mingpt4;
 
 class ScaledDotProductAttention
 {
     public static Matrix ComputeAttention (Matrix Q, Matrix K, Matrix V) {
-        Matrix K_T = Matrix.Transpose (K);
+        Matrix K_T = K.Transpose ();
         Matrix scores = Matrix.Multiply (Q, K_T);
 
         double scale = Math.Sqrt (Q.Cols);

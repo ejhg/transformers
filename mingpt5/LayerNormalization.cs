@@ -2,7 +2,7 @@ namespace mingpt5;
 
 public class LayerNormalization
 {
-    public int FeatureSize;
+    public int EmbeddingDim;
     public Vector Gamma;
     public Vector Beta;
     public Vector Input;
@@ -10,17 +10,13 @@ public class LayerNormalization
     public double Mean;
     public double Variance;
 
-    public LayerNormalization (int featureSize) {
-        FeatureSize = featureSize;
-        Gamma = new Vector (featureSize);
-        Beta = new Vector (featureSize);
-        InitializeParameters ();
-    }
+    public LayerNormalization (int embeddingDim) {
+        EmbeddingDim = embeddingDim;
+        Gamma = new Vector (embeddingDim);
+        Beta = new Vector (embeddingDim);
 
-    private void InitializeParameters () {
-        for (int i = 0; i < FeatureSize; i++) {
+        for (int i = 0; i < EmbeddingDim; i++) {
             Gamma.Data[i] = 1.0;
-            Beta.Data[i] = 0.0;
         }
     }
 
@@ -29,20 +25,20 @@ public class LayerNormalization
         Mean = 0.0;
         Variance = 0.0;
 
-        for (int i = 0; i < FeatureSize; i++) {
+        for (int i = 0; i < EmbeddingDim; i++) {
             Mean += Input.Data[i];
         }
 
-        Mean /= FeatureSize;
+        Mean /= EmbeddingDim;
 
-        for (int i = 0; i < FeatureSize; i++) {
+        for (int i = 0; i < EmbeddingDim; i++) {
             Variance += Math.Pow (Input.Data[i] - Mean, 2);
         }
 
-        Variance /= FeatureSize;
+        Variance /= EmbeddingDim;
 
-        Normalized = new Vector (FeatureSize);
-        for (int i = 0; i < FeatureSize; i++) {
+        Normalized = new Vector (EmbeddingDim);
+        for (int i = 0; i < EmbeddingDim; i++) {
             Normalized.Data[i] = (Input.Data[i] - Mean) / Math.Sqrt (Variance + 1e-6);
             Normalized.Data[i] = Gamma.Data[i] * Normalized.Data[i] + Beta.Data[i];
         }
@@ -51,30 +47,30 @@ public class LayerNormalization
     }
 
     public Vector Backward (Vector dout) {
-        Vector dGamma = new Vector (FeatureSize);
-        Vector dBeta = new Vector (FeatureSize);
-        Vector dx = new Vector (FeatureSize);
+        Vector dGamma = new Vector (EmbeddingDim);
+        Vector dBeta = new Vector (EmbeddingDim);
+        Vector dx = new Vector (EmbeddingDim);
 
         double invStd = 1.0 / Math.Sqrt (Variance + 1e-6);
-        Vector xHat = new Vector (FeatureSize);
-        for (int i = 0; i < FeatureSize; i++) {
+        Vector xHat = new Vector (EmbeddingDim);
+        for (int i = 0; i < EmbeddingDim; i++) {
             xHat.Data[i] = (Input.Data[i] - Mean) * invStd;
         }
 
-        for (int i = 0; i < FeatureSize; i++) {
+        for (int i = 0; i < EmbeddingDim; i++) {
             dGamma.Data[i] += dout.Data[i] * xHat.Data[i];
             dBeta.Data[i] += dout.Data[i];
         }
 
-        for (int i = 0; i < FeatureSize; i++) {
+        for (int i = 0; i < EmbeddingDim; i++) {
             double dXhat = dout.Data[i] * Gamma.Data[i];
             double dVar = -0.5 * dXhat * (Input.Data[i] - Mean) * Math.Pow (Variance + 1e-6, -1.5);
             double dMean = -dXhat * invStd;
-            dx.Data[i] += dXhat * invStd + dVar * 2.0 * (Input.Data[i] - Mean) / FeatureSize + dMean / FeatureSize;
+            dx.Data[i] += dXhat * invStd + dVar * 2.0 * (Input.Data[i] - Mean) / EmbeddingDim + dMean / EmbeddingDim;
         }
 
         // Update parameters
-        for (int i = 0; i < FeatureSize; i++) {
+        for (int i = 0; i < EmbeddingDim; i++) {
             Gamma.Data[i] -= dout.Data[i] * xHat.Data[i];
             Beta.Data[i] -= dout.Data[i];
         }

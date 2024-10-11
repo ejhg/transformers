@@ -1,3 +1,5 @@
+using mingpt5;
+
 namespace mingpt4;
 
 class FeedForwardNetwork
