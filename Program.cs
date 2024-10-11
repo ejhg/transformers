@@ -1,5 +1,5 @@
-﻿using MiniGPT2;
+﻿using mingpt7;
 
 Console.WriteLine("start");
 
-MinGPT3Test.run ();
+MinGPT7Test.run ();

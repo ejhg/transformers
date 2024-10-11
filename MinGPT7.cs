@@ -733,22 +733,26 @@ public class Trainer
         this.learningRate = learningRate;
     }
 
-    public void Train (int[] tokenIndices, int numEpochs) {
+    public void Train (Func<(int[], int)> data, int numEpochs) {
         for (int epoch = 0; epoch < numEpochs; epoch++) {
+
+            var (tokenIndices, targetIndex) = data ();
+
             double[][] outputs = model.Forward (tokenIndices);
 
-            double totalLoss = 0.0;
-            int T = tokenIndices.Length;
-            for (int t = 0; t < T - 1; t++) {
-                double[] probs = model.Predict (outputs[t]);
-                int targetIndex = tokenIndices[t + 1];
-                double loss = MathUtils.CrossEntropyLoss (probs, targetIndex);
-                totalLoss += loss;
-            }
+            if (epoch % 10 == 0) {
+                double totalLoss = 0.0;
+                int T = tokenIndices.Length;
+                for (int t = 0; t < T - 1; t++) {
+                    double[] probs = model.Predict (outputs[t]);
+                    double loss = MathUtils.CrossEntropyLoss (probs, targetIndex);
+                    totalLoss += loss;
+                }
 
-            double avgLoss = totalLoss / (T - 1);
-            double perplexity = Math.Exp (avgLoss);
-            Console.WriteLine ($"Epoch {epoch + 1}, Loss: {avgLoss:F4}, Perplexity: {perplexity:F4}");
+                double avgLoss = totalLoss / (T - 1);
+                double perplexity = Math.Exp (avgLoss);
+                Console.WriteLine ($"Epoch {epoch + 1}, Loss: {avgLoss:F4}, Perplexity: {perplexity:F4}");
+            }
 
             model.Backward (tokenIndices, outputs);
             model.UpdateParameters (learningRate);
@@ -776,31 +780,54 @@ public class Trainer
     }
 }
 
-public class Program
+public class MinGPT7Test
 {
-    public static void Main (string[] args) {
-        int vocabSize = 1000;
+    public static void run () {
         int embeddingDim = 64;
         int numHeads = 4;
-        int numLayers = 2;
+        int numLayers = 6;
         int hiddenDim = 128;
         double learningRate = 0.001;
-        int numEpochs = 10;
+        int numEpochs = 100000;
+
+        var data = LoadData (sequenceLength: 8, out var vocabSize, out var dictionary);
 
         Transformer model = new Transformer (vocabSize, embeddingDim, numHeads, numLayers, hiddenDim);
         Trainer trainer = new Trainer (model, learningRate);
 
-        int[] tokenIndices = new int[] {
-            1,
-            2,
-            3,
-            4,
-            5
+        trainer.Train (data, numEpochs);
+
+        // int nextToken = trainer.PredictNextToken (tokenIndices);
+        // Console.WriteLine ($"Next token predicted: {nextToken}");
+    }
+
+    static Func<(int[], int)> LoadData (int sequenceLength, out int vocabularySize, out char[] vocabulary) {
+        var text = File.ReadAllText ("resources/tinyshakespeare.txt");
+        var sourceCharacters = text.ToArray ();
+
+        vocabulary = sourceCharacters
+            .Distinct ()
+            .Order ()
+            .ToArray ();
+        vocabularySize = vocabulary.Length;
+
+        Console.WriteLine ($"vocabulary: {string.Join ("", vocabulary)}");
+
+        var charToIndex = vocabulary
+            .Select ((c, index) => (c, index))
+            .ToDictionary ();
+
+        var data = sourceCharacters.Select (c => charToIndex[c]).ToArray ();
+
+        var rnd = new Random ();
+
+        return () => {
+            var sample = data
+                .Skip (rnd.Next (0, data.Length - sequenceLength - 1))
+                .Take (sequenceLength + 1)
+                .ToArray ();
+
+            return (sample.Take (sequenceLength).ToArray (), sample[^1]);
         };
-
-        trainer.Train (tokenIndices, numEpochs);
-
-        int nextToken = trainer.PredictNextToken (tokenIndices);
-        Console.WriteLine ($"Next token predicted: {nextToken}");
     }
 }
