@@ -12,11 +12,7 @@ public class Optimizer
         model.TokenEmbedding.UpdateParameters (LearningRate);
         model.PositionalEmbedding.UpdateParameters (LearningRate);
 
-        // Update final linear layer
-        model.FinalLayer.Weights -= LearningRate * model.FinalLayer.GradWeights;
-        model.FinalLayer.Bias -= LearningRate * model.FinalLayer.GradBias;
-        model.FinalLayer.GradWeights.Clear ();
-        model.FinalLayer.GradBias.Clear ();
+        model.FinalLayer.UpdateParameters (LearningRate);
 
         // Update transformer layers
         foreach (var layer in model.Layers) {
@@ -31,29 +27,11 @@ public class Optimizer
             layer.SelfAttention.GradWv.Clear ();
             layer.SelfAttention.GradWo.Clear ();
 
-            // Update feed-forward network parameters
-            layer.FFN.Linear1.Weights -= LearningRate * layer.FFN.Linear1.GradWeights;
-            layer.FFN.Linear1.Bias -= LearningRate * layer.FFN.Linear1.GradBias;
-            layer.FFN.Linear2.Weights -= LearningRate * layer.FFN.Linear2.GradWeights;
-            layer.FFN.Linear2.Bias -= LearningRate * layer.FFN.Linear2.GradBias;
+            layer.FFN.Linear1.UpdateParameters (LearningRate);
+            layer.FFN.Linear2.UpdateParameters (LearningRate);
 
-            layer.FFN.Linear1.GradWeights.Clear ();
-            layer.FFN.Linear1.GradBias.Clear ();
-            layer.FFN.Linear2.GradWeights.Clear ();
-            layer.FFN.Linear2.GradBias.Clear ();
-
-            // Update layer norm parameters
-            for (int i = 0; i < layer.LayerNorm1.EmbeddingSize; i++) {
-                layer.LayerNorm1.Gamma[i] -= LearningRate * layer.LayerNorm1.GradGamma[i];
-                layer.LayerNorm1.Beta[i] -= LearningRate * layer.LayerNorm1.GradBeta[i];
-                layer.LayerNorm1.GradGamma[i] = 0.0;
-                layer.LayerNorm1.GradBeta[i] = 0.0;
-
-                layer.LayerNorm2.Gamma[i] -= LearningRate * layer.LayerNorm2.GradGamma[i];
-                layer.LayerNorm2.Beta[i] -= LearningRate * layer.LayerNorm2.GradBeta[i];
-                layer.LayerNorm2.GradGamma[i] = 0.0;
-                layer.LayerNorm2.GradBeta[i] = 0.0;
-            }
+            layer.LayerNorm1.UpdateParameters (LearningRate);
+            layer.LayerNorm2.UpdateParameters (LearningRate);
         }
     }
 }

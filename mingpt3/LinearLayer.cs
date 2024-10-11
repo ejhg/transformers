@@ -2,7 +2,6 @@ namespace mingpt3;
 
 public class LinearLayer
 {
-    public int InputSize, OutputSize;
     public Matrix Weights;
     public Matrix Bias;
     public Matrix GradWeights;
@@ -10,8 +9,6 @@ public class LinearLayer
     private Matrix Input;
 
     public LinearLayer (int inputSize, int outputSize) {
-        InputSize = inputSize;
-        OutputSize = outputSize;
         Weights = Matrix.Random (inputSize, outputSize);
         Bias = new Matrix (1, outputSize);
         GradWeights = new Matrix (inputSize, outputSize);
@@ -26,7 +23,13 @@ public class LinearLayer
     public Matrix Backward (Matrix dOutput) {
         GradWeights += Input.Transpose () * dOutput;
         GradBias += dOutput.SumRows ();
-        var dInput = dOutput * Weights.Transpose ();
-        return dInput;
+        return dOutput * Weights.Transpose ();
+    }
+
+    public void UpdateParameters (double LearningRate) {
+        Weights -= LearningRate * GradWeights;
+        Bias -= LearningRate * GradBias;
+        GradWeights.Clear ();
+        GradBias.Clear ();
     }
 }

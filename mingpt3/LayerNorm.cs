@@ -92,4 +92,13 @@ public class LayerNorm
 
         return dx;
     }
+
+    public void UpdateParameters (double LearningRate) {
+        for (int i = 0; i < EmbeddingSize; i++) {
+            Gamma[i] -= LearningRate * GradGamma[i];
+            Beta[i] -= LearningRate * GradBeta[i];
+            GradGamma[i] = 0.0;
+            GradBeta[i] = 0.0;
+        }
+    }
 }

@@ -22,8 +22,7 @@ class OutputLayer
     }
 
     public Matrix Forward (Matrix X) {
-        Matrix logits = Matrix.Multiply (X, W_out);
-        return logits;
+        return Matrix.Multiply (X, W_out);
     }
 
     // Backward pass (omitted for brevity)
