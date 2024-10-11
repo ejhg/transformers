@@ -22,7 +22,7 @@ public class Trainer
                 int T = tokenIndices.Length;
                 for (int t = 0; t < T - 1; t++) {
                     double[] probs = model.Predict (outputs[t]);
-                    double loss = MathUtils.CrossEntropyLoss (probs, targetIndex);
+                    double loss = math.CrossEntropyLoss (probs, targetIndex);
                     totalLoss += loss;
                 }
 

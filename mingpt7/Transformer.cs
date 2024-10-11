@@ -57,9 +57,9 @@ public class Transformer
     }
 
     public double[] Predict (double[] x_t) {
-        double[] logits = MathUtils.MatVecMul (linearWeight, x_t);
-        logits = MathUtils.Add (logits, linearBias);
-        double[] probs = MathUtils.Softmax (logits);
+        double[] logits = math.MatVecMul (linearWeight, x_t);
+        logits = math.Add (logits, linearBias);
+        double[] probs = math.Softmax (logits);
         return probs;
     }
 

@@ -55,15 +55,15 @@ public class FeedForward
 
     public double[] Forward (double[] x) {
         x_input = x;
-        hidden = MathUtils.MatVecMul (W1, x);
-        hidden = MathUtils.Add (hidden, b1);
+        hidden = math.MatVecMul (W1, x);
+        hidden = math.Add (hidden, b1);
         // Apply activation function, e.g., ReLU
         hiddenActivation = new double[hiddenDim];
         for (int i = 0; i < hiddenDim; i++)
             hiddenActivation[i] = Math.Max (0, hidden[i]);
 
-        double[] outp = MathUtils.MatVecMul (W2, hiddenActivation);
-        outp = MathUtils.Add (outp, b2);
+        double[] outp = math.MatVecMul (W2, hiddenActivation);
+        outp = math.Add (outp, b2);
         return outp;
     }
 

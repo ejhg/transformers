@@ -20,7 +20,7 @@ public class TransformerBlock
         double[][] attnOut = selfAttention.Forward (x);
         double[][] x1 = new double[x.Length][];
         for (int t = 0; t < x.Length; t++) {
-            x1[t] = MathUtils.Add (x[t], attnOut[t]);
+            x1[t] = math.Add (x[t], attnOut[t]);
             x1[t] = layerNorm1.Forward (x1[t]);
         }
 
@@ -31,7 +31,7 @@ public class TransformerBlock
 
         double[][] outp = new double[x.Length][];
         for (int t = 0; t < x.Length; t++) {
-            outp[t] = MathUtils.Add (x1[t], ffOut[t]);
+            outp[t] = math.Add (x1[t], ffOut[t]);
             outp[t] = layerNorm2.Forward (outp[t]);
         }
 
@@ -47,7 +47,7 @@ public class TransformerBlock
 
         double[][] gradAttnInput = new double[gradOutput.Length][];
         for (int t = 0; t < gradOutput.Length; t++) {
-            double[] gradResidual = MathUtils.Add (gradFF[t], gradOutput[t]);
+            double[] gradResidual = math.Add (gradFF[t], gradOutput[t]);
             double[] gradLN = layerNorm1.Backward (gradResidual);
             gradAttnInput[t] = gradLN;
         }

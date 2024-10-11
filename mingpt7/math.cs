@@ -1,28 +1,12 @@
 namespace mingpt7;
 
-public static class MathUtils
+public static class math
 {
     // Vector addition
     public static double[] Add (double[] a, double[] b) {
         double[] result = new double[a.Length];
         for (int i = 0; i < a.Length; i++)
             result[i] = a[i] + b[i];
-        return result;
-    }
-
-    // Vector subtraction
-    public static double[] Subtract (double[] a, double[] b) {
-        double[] result = new double[a.Length];
-        for (int i = 0; i < a.Length; i++)
-            result[i] = a[i] - b[i];
-        return result;
-    }
-
-    // Element-wise multiplication
-    public static double[] Multiply (double[] a, double[] b) {
-        double[] result = new double[a.Length];
-        for (int i = 0; i < a.Length; i++)
-            result[i] = a[i] * b[i];
         return result;
     }
 
@@ -54,34 +38,6 @@ public static class MathUtils
             result[i] = sum;
         }
 
-        return result;
-    }
-
-    // Matrix-matrix multiplication
-    public static double[,] MatMul (double[,] a, double[,] b) {
-        int aRows = a.GetLength (0);
-        int aCols = a.GetLength (1);
-        int bCols = b.GetLength (1);
-        double[,] result = new double[aRows, bCols];
-        for (int i = 0; i < aRows; i++)
-        for (int j = 0; j < bCols; j++) {
-            double sum = 0.0;
-            for (int k = 0; k < aCols; k++)
-                sum += a[i, k] * b[k, j];
-            result[i, j] = sum;
-        }
-
-        return result;
-    }
-
-    // Transpose matrix
-    public static double[,] Transpose (double[,] matrix) {
-        int rows = matrix.GetLength (0);
-        int cols = matrix.GetLength (1);
-        double[,] result = new double[cols, rows];
-        for (int i = 0; i < rows; i++)
-        for (int j = 0; j < cols; j++)
-            result[j, i] = matrix[i, j];
         return result;
     }
 

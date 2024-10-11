@@ -59,12 +59,12 @@ public class MultiHeadSelfAttention
         K = new double[T][];
         V = new double[T][];
         for (int t = 0; t < T; t++) {
-            Q[t] = MathUtils.MatVecMul (W_q, x[t]);
-            K[t] = MathUtils.MatVecMul (W_k, x[t]);
-            V[t] = MathUtils.MatVecMul (W_v, x[t]);
+            Q[t] = math.MatVecMul (W_q, x[t]);
+            K[t] = math.MatVecMul (W_k, x[t]);
+            V[t] = math.MatVecMul (W_v, x[t]);
 
-            Q[t] = MathUtils.ApplyROPE (Q[t], t);
-            K[t] = MathUtils.ApplyROPE (K[t], t);
+            Q[t] = math.ApplyROPE (Q[t], t);
+            K[t] = math.ApplyROPE (K[t], t);
         }
 
         // Compute attention
@@ -81,7 +81,7 @@ public class MultiHeadSelfAttention
                 Array.Copy (headOutputs[h][t], 0, attnOutput[t], h * headDim, headDim);
             }
 
-            attnOutput[t] = MathUtils.MatVecMul (W_o, attnOutput[t]);
+            attnOutput[t] = math.MatVecMul (W_o, attnOutput[t]);
         }
 
         return attnOutput;
@@ -106,14 +106,14 @@ public class MultiHeadSelfAttention
         for (int t = 0; t < T; t++) {
             double[] scores = new double[t + 1];
             for (int s = 0; s <= t; s++) {
-                scores[s] = MathUtils.Dot (q[t], k[s]) * scale;
+                scores[s] = math.Dot (q[t], k[s]) * scale;
             }
 
-            double[] attnWeights = MathUtils.Softmax (scores);
+            double[] attnWeights = math.Softmax (scores);
             attnOutput[t] = new double[headDim];
             for (int s = 0; s <= t; s++) {
-                double[] weightedV = MathUtils.Multiply (v[s], attnWeights[s]);
-                attnOutput[t] = MathUtils.Add (attnOutput[t], weightedV);
+                double[] weightedV = math.Multiply (v[s], attnWeights[s]);
+                attnOutput[t] = math.Add (attnOutput[t], weightedV);
             }
         }
 
