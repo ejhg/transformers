@@ -1,3 +1,5 @@
+using mingpt3;
+
 namespace mingpt1;
 
 /// <summary>

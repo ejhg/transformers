@@ -1,24 +1,24 @@
+using mingpt3;
+using transformers.utils;
+
 namespace mingpt1;
 
 public class MinGPT1Test
 {
-    static int[] data;
-
-    public static void Main () {
-        int vocabSize = 1000;
+    public static void run () {
         int embeddingSize = 64;
         int numHeads = 4;
         int numLayers = 2;
         int maxSeqLen = 128;
 
-        var text = File.ReadAllText ("resources/tinyshakespeare.txt");
-        data = text.Select (_ => (int)_).ToArray ();
+        var data = DataLoader.LoadData (maxSeqLen, out var vocabSize, out var dictionary);
 
         var model = new MinGPT1 (vocabSize, embeddingSize, numHeads, numLayers, maxSeqLen);
         var optimizer = new Optimizer (learningRate: 0.001);
 
         for (int epoch = 0; epoch < 10000; epoch++) {
-            int[] inputIds = GetTrainingData (maxSeqLen - 1);
+            var (inputIds, _) = data ();
+
             var logits = model.Forward (inputIds);
 
             double loss = ComputeLoss (logits, inputIds, out Matrix dLogits);
@@ -28,14 +28,6 @@ public class MinGPT1Test
 
             Console.WriteLine ($"Epoch {epoch}, Loss: {loss}");
         }
-    }
-
-    static int[] GetTrainingData (int length) {
-        var rand = new Random ();
-        return data
-            .Skip (rand.Next (data.Length - length))
-            .Take (length)
-            .ToArray ();
     }
 
     static double ComputeLoss (Matrix logits, int[] targetIds, out Matrix dLogits) {

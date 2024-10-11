@@ -108,4 +108,16 @@ public class Matrix
             result.Data[i, j] = -a.Data[i, j];
         return result;
     }
+
+    public static Matrix operator + (Matrix a, double scalar) {
+        var result = new Matrix (a.Rows, a.Cols);
+        for (int i = 0; i < a.Rows; i++)
+        for (int j = 0; j < a.Cols; j++)
+            result.Data[i, j] = a.Data[i, j] + scalar;
+        return result;
+    }
+
+    public static Matrix operator + (double scalar, Matrix a) {
+        return a + scalar;
+    }
 }

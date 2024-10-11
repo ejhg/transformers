@@ -1,5 +1,3 @@
-﻿using mingpt7;
+﻿Console.WriteLine("start");
 
-Console.WriteLine("start");
-
-MinGPT7Test.run ();
+mingpt3.MinGPT3Test.run ();

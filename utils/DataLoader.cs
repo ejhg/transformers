@@ -6,19 +6,16 @@ static class DataLoader
         var text = File.ReadAllText ("resources/tinyshakespeare.txt");
         var sourceCharacters = text.ToArray ();
 
-        vocabulary = sourceCharacters
+        var _vocabulary = sourceCharacters
             .Distinct ()
             .Order ()
             .ToArray ();
+        vocabulary = _vocabulary;
         vocabularySize = vocabulary.Length;
 
         Console.WriteLine ($"vocabulary: {string.Join ("", vocabulary)}");
 
-        var charToIndex = vocabulary
-            .Select ((c, index) => (c, index))
-            .ToDictionary ();
-
-        var data = sourceCharacters.Select (c => charToIndex[c]).ToArray ();
+        var data = encode (text, vocabulary);
 
         var rnd = new Random ();
 
@@ -30,5 +27,16 @@ static class DataLoader
 
             return (sample.Take (sequenceLength).ToArray (), sample[^1]);
         };
+    }
+
+    public static int[] encode (string source, char[] vocabulary) {
+        var charToIndex = vocabulary
+            .Select ((c, index) => (c, index))
+            .ToDictionary ();
+        return source.Select (c => charToIndex[c]).ToArray ();
+    }
+
+    public static string decode (int[] tokens, char[] vocabulary) {
+        return string.Join ("", tokens.Select (c => c >= vocabulary.Length ? '?' : vocabulary[c]).ToArray ());
     }
 }

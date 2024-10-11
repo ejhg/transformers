@@ -1,3 +1,5 @@
+using transformers.utils;
+
 namespace mingpt3;
 
 public class MinGPT3Test
@@ -9,18 +11,15 @@ public class MinGPT3Test
         int maxSeqLen = 8;
         int batchSize = 1;
 
-        var data = LoadData (maxSeqLen, out var vocabSize, out var vocabulary);
-
-        Console.WriteLine("vocabulary size: " + vocabSize);
+        var data = DataLoader.LoadData (maxSeqLen, out var vocabSize, out var vocabulary);
 
         var model = new GPTModel (vocabSize, embeddingSize, numHeads, numLayers, maxSeqLen);
         var optimizer = new Optimizer (learningRate: 0.0005);
 
         for (int epoch = 0; epoch < 1000; epoch++) {
-
             var batchInputIds = Enumerable
                 .Range (0, batchSize)
-                .Select (_ => data ())
+                .Select (_ => data ().Item1)
                 .ToArray ();
 
             var logitsBatch = model.Forward (batchInputIds);
@@ -30,86 +29,8 @@ public class MinGPT3Test
             model.Backward (dLogitsBatch, batchInputIds);
             optimizer.Step (model);
 
-            Console.WriteLine ($"Epoch {epoch}, Loss: {loss:F4}");
-
-            var tokens =  Enumerable
-                .Range (0, 5)
-                .Select (i => model.PredictNextToken (encode ("The", vocabulary), temperature: 0.7, topK: 40))
-                .ToArray ();
-            Console.Write (decode (tokens, vocabulary));
+            Console.WriteLine ($"Epoch {epoch}, Loss: {loss:F4}, {predict (model, vocabulary, "The ", maxSeqLen)}");
         }
-
-        // After training, generate text
-        int[] seedInput = GetSeedInput (); // Your initial sequence of tokens
-        int generatedLength = 20; // Number of tokens to generate
-
-        var generatedTokens = new List<int> (seedInput);
-
-        for (int i = 0; i < generatedLength; i++) {
-            int[] currentInput = generatedTokens.ToArray ();
-            int nextTokenId = model.PredictNextToken (currentInput);
-            generatedTokens.Add (nextTokenId);
-        }
-
-        // Convert token IDs to actual tokens (depends on your tokenizer)
-        string generatedText = DecodeTokens (generatedTokens.ToArray ());
-        Console.WriteLine ("Generated Text:");
-        Console.WriteLine (generatedText);
-    }
-
-    static int[] GetSeedInput () {
-        // Provide your own seed input sequence
-        // For demonstration, we'll generate a random sequence
-        var rand = new Random ();
-        int seqLen = 5;
-        var inputIds = new int[seqLen];
-        for (int i = 0; i < seqLen; i++)
-            inputIds[i] = rand.Next (0, 1000);
-        return inputIds;
-    }
-
-    static string DecodeTokens (int[] tokenIds) {
-        // Convert token IDs back to text
-        // This depends on your tokenizer/vocabulary mapping
-        // For demonstration, we'll just return token IDs as strings
-        return string.Join (" ", tokenIds);
-    }
-
-    static int[] encode (string source, char[] vocabulary) {
-        var charToIndex = vocabulary
-            .Select ((c, index) => (c, index))
-            .ToDictionary ();
-        return source.Select (c => charToIndex[c]).ToArray ();
-    }
-
-    static string decode (int[] tokens, char[] vocabulary) {
-        return string.Join ("", tokens.Select (c => c >= vocabulary.Length ? '?' : vocabulary[c]).ToArray ());
-    }
-
-    static Func<int[]> LoadData (int sequenceLength, out int vocabularySize, out char[] vocabulary) {
-        var text = File.ReadAllText ("resources/tinyshakespeare.txt");
-        var sourceCharacters = text.ToArray ();
-
-        vocabulary = sourceCharacters
-            .Distinct ()
-            .Order()
-            .ToArray ();
-        vocabularySize = vocabulary.Length;
-
-        Console.WriteLine($"vocabulary: {string.Join ("",vocabulary)}");
-
-        var charToIndex = vocabulary
-            .Select ((c, index) => (c, index))
-            .ToDictionary ();
-
-        var data = sourceCharacters.Select (c => charToIndex[c]).ToArray ();
-
-        var rnd = new Random ();
-
-        return () => data
-            .Skip (rnd.Next(0, data.Length - sequenceLength))
-            .Take (sequenceLength)
-            .ToArray ();
     }
 
     static double ComputeLoss (Matrix[] logitsBatch, int[][] batchTargetIds, out Matrix[] dLogitsBatch) {
@@ -161,5 +82,18 @@ public class MinGPT3Test
 
         totalLoss /= batchSize;
         return totalLoss;
+    }
+
+    static string predict (GPTModel model, char[] vocabulary, string prompt, int generatedLength) {
+        int[] seedInput = DataLoader.encode (prompt, vocabulary);
+
+        var generatedTokens = new List<int> (seedInput);
+
+        for (int i = 0; i < generatedLength - prompt.Length; i++) {
+            int nextTokenId = model.PredictNextToken (generatedTokens.ToArray ());
+            generatedTokens.Add (nextTokenId);
+        }
+
+        return DataLoader.decode (generatedTokens.ToArray (), vocabulary);
     }
 }
