@@ -1,5 +1,3 @@
-using System;
-
 namespace mingpt5;
 
 // Vector class
@@ -198,6 +196,15 @@ public class Matrix
     {
         return new Matrix(Data);
     }
+
+    public static Matrix OuterProduct(Vector a, Vector b)
+    {
+        Matrix result = new Matrix(a.Size, b.Size);
+        for (int i = 0; i < a.Size; i++)
+        for (int j = 0; j < b.Size; j++)
+            result.Data[i][j] = a.Data[i] * b.Data[j];
+        return result;
+    }
 }
 
 // Embedding Layer
@@ -206,12 +213,14 @@ public class EmbeddingLayer
     public int VocabSize;
     public int EmbeddingDim;
     public Matrix EmbeddingMatrix;
+    public Dictionary<int, Vector> Gradients;
 
     public EmbeddingLayer(int vocabSize, int embeddingDim)
     {
         VocabSize = vocabSize;
         EmbeddingDim = embeddingDim;
         EmbeddingMatrix = new Matrix(VocabSize, EmbeddingDim);
+        Gradients = new Dictionary<int, Vector>();
         InitializeWeights();
     }
 
@@ -233,16 +242,33 @@ public class EmbeddingLayer
         return embedding;
     }
 
-    public void UpdateEmbedding(int tokenIndex, Vector grad, double learningRate)
+    public void Backward(int tokenIndex, Vector grad)
     {
+        if (!Gradients.ContainsKey(tokenIndex))
+            Gradients[tokenIndex] = new Vector(EmbeddingDim);
+
         for (int i = 0; i < EmbeddingDim; i++)
         {
-            EmbeddingMatrix.Data[tokenIndex][i] -= learningRate * grad.Data[i];
+            Gradients[tokenIndex].Data[i] += grad.Data[i];
         }
+    }
+
+    public void UpdateParameters(double learningRate)
+    {
+        foreach (var kvp in Gradients)
+        {
+            int tokenIndex = kvp.Key;
+            Vector grad = kvp.Value;
+            for (int i = 0; i < EmbeddingDim; i++)
+            {
+                EmbeddingMatrix.Data[tokenIndex][i] -= learningRate * grad.Data[i];
+            }
+        }
+        Gradients.Clear();
     }
 }
 
-// Positional Encoding (Rotational Positional Encoding)
+// Positional Encoding (RoPE)
 public class PositionalEncoding
 {
     public int EmbeddingDim;
@@ -252,11 +278,11 @@ public class PositionalEncoding
         EmbeddingDim = embeddingDim;
     }
 
-    public void ApplyRoPE(Vector embedding, int position)
+    public Vector ApplyRoPE(Vector embedding, int position)
     {
-        // Implementing Rotational Positional Encoding
         int halfDim = EmbeddingDim / 2;
         double theta = 10000.0;
+        Vector output = embedding.Clone();
         for (int i = 0; i < halfDim; i++)
         {
             double angle = position / Math.Pow(theta, (2.0 * i) / EmbeddingDim);
@@ -265,9 +291,10 @@ public class PositionalEncoding
             double original1 = embedding.Data[2 * i];
             double original2 = embedding.Data[2 * i + 1];
 
-            embedding.Data[2 * i] = original1 * cosAngle - original2 * sinAngle;
-            embedding.Data[2 * i + 1] = original1 * sinAngle + original2 * cosAngle;
+            output.Data[2 * i] = original1 * cosAngle - original2 * sinAngle;
+            output.Data[2 * i + 1] = original1 * sinAngle + original2 * cosAngle;
         }
+        return output;
     }
 }
 
@@ -277,6 +304,10 @@ public class LayerNormalization
     public int FeatureSize;
     public Vector Gamma;
     public Vector Beta;
+    public Vector Input;
+    public Vector Normalized;
+    public double Mean;
+    public double Variance;
 
     public LayerNormalization(int featureSize)
     {
@@ -295,90 +326,69 @@ public class LayerNormalization
         }
     }
 
-    public Vector Normalize(Vector input)
+    public Vector Forward(Vector input)
     {
-        double mean = 0.0;
-        double variance = 0.0;
+        Input = input.Clone();
+        Mean = 0.0;
+        Variance = 0.0;
 
         for (int i = 0; i < FeatureSize; i++)
         {
-            mean += input.Data[i];
+            Mean += Input.Data[i];
         }
-        mean /= FeatureSize;
+        Mean /= FeatureSize;
 
         for (int i = 0; i < FeatureSize; i++)
         {
-            variance += Math.Pow(input.Data[i] - mean, 2);
+            Variance += Math.Pow(Input.Data[i] - Mean, 2);
         }
-        variance /= FeatureSize;
+        Variance /= FeatureSize;
 
-        Vector normalized = new Vector(FeatureSize);
+        Normalized = new Vector(FeatureSize);
         for (int i = 0; i < FeatureSize; i++)
         {
-            normalized.Data[i] = (input.Data[i] - mean) / Math.Sqrt(variance + 1e-6);
-            normalized.Data[i] = Gamma.Data[i] * normalized.Data[i] + Beta.Data[i];
+            Normalized.Data[i] = (Input.Data[i] - Mean) / Math.Sqrt(Variance + 1e-6);
+            Normalized.Data[i] = Gamma.Data[i] * Normalized.Data[i] + Beta.Data[i];
         }
 
-        return normalized;
+        return Normalized;
     }
 
-    public (Vector, double, double) Forward(Vector input)
+    public Vector Backward(Vector dout)
     {
-        // Returns normalized input, mean, and variance for backward pass
-        double mean = 0.0;
-        double variance = 0.0;
-
-        for (int i = 0; i < FeatureSize; i++)
-        {
-            mean += input.Data[i];
-        }
-        mean /= FeatureSize;
-
-        for (int i = 0; i < FeatureSize; i++)
-        {
-            variance += Math.Pow(input.Data[i] - mean, 2);
-        }
-        variance /= FeatureSize;
-
-        Vector normalized = new Vector(FeatureSize);
-        for (int i = 0; i < FeatureSize; i++)
-        {
-            normalized.Data[i] = (input.Data[i] - mean) / Math.Sqrt(variance + 1e-6);
-            normalized.Data[i] = Gamma.Data[i] * normalized.Data[i] + Beta.Data[i];
-        }
-
-        return (normalized, mean, variance);
-    }
-
-    public (Vector, Vector, Vector) Backward(Vector dout, Vector input, double mean, double variance)
-    {
-        // Backpropagation for Layer Normalization
         Vector dGamma = new Vector(FeatureSize);
         Vector dBeta = new Vector(FeatureSize);
         Vector dx = new Vector(FeatureSize);
 
-        double invStd = 1.0 / Math.Sqrt(variance + 1e-6);
+        double invStd = 1.0 / Math.Sqrt(Variance + 1e-6);
         Vector xHat = new Vector(FeatureSize);
         for (int i = 0; i < FeatureSize; i++)
         {
-            xHat.Data[i] = (input.Data[i] - mean) * invStd;
+            xHat.Data[i] = (Input.Data[i] - Mean) * invStd;
         }
 
         for (int i = 0; i < FeatureSize; i++)
         {
-            dGamma.Data[i] = dout.Data[i] * xHat.Data[i];
-            dBeta.Data[i] = dout.Data[i];
+            dGamma.Data[i] += dout.Data[i] * xHat.Data[i];
+            dBeta.Data[i] += dout.Data[i];
         }
 
         for (int i = 0; i < FeatureSize; i++)
         {
             double dXhat = dout.Data[i] * Gamma.Data[i];
-            double dVar = -0.5 * dXhat * (input.Data[i] - mean) * Math.Pow(variance + 1e-6, -1.5);
+            double dVar = -0.5 * dXhat * (Input.Data[i] - Mean) * Math.Pow(Variance + 1e-6, -1.5);
             double dMean = -dXhat * invStd;
-            dx.Data[i] = dXhat * invStd + dVar * 2.0 * (input.Data[i] - mean) / FeatureSize + dMean / FeatureSize;
+            dx.Data[i] += dXhat * invStd + dVar * 2.0 * (Input.Data[i] - Mean) / FeatureSize + dMean / FeatureSize;
         }
 
-        return (dx, dGamma, dBeta);
+        // Update parameters
+        for (int i = 0; i < FeatureSize; i++)
+        {
+            Gamma.Data[i] -= dout.Data[i] * xHat.Data[i];
+            Beta.Data[i] -= dout.Data[i];
+        }
+
+        return dx;
     }
 }
 
@@ -392,6 +402,12 @@ public class MultiHeadAttention
     public Matrix[] Wk;
     public Matrix[] Wv;
     public Matrix Wo;
+    // Cache for backward pass
+    public Vector[] Q;
+    public Vector[][] K;
+    public Vector[][] V;
+    public double[][] AttentionWeights;
+    public Vector[] Inputs;
 
     public MultiHeadAttention(int embeddingDim, int numHeads)
     {
@@ -425,76 +441,187 @@ public class MultiHeadAttention
             m.Data[i][j] = (rand.NextDouble() - 0.5) / m.Cols;
     }
 
-    public Vector Forward(Vector[] inputs)
+    public Vector Forward(Vector[] inputs, int position)
     {
-        // inputs: list of embeddings for sequence positions
+        Inputs = inputs;
         int seqLength = inputs.Length;
-        Vector[] outputs = new Vector[seqLength];
+        Q = new Vector[NumHeads];
+        K = new Vector[NumHeads][];
+        V = new Vector[NumHeads][];
+        AttentionWeights = new double[NumHeads][];
+        Vector concatHeads = new Vector(EmbeddingDim);
 
-        for (int pos = 0; pos < seqLength; pos++)
+        for (int h = 0; h < NumHeads; h++)
         {
-            Vector concatHeads = new Vector(EmbeddingDim);
-            for (int h = 0; h < NumHeads; h++)
+            // Compute query, key, value for this head
+            Q[h] = Wq[h].Multiply(inputs[position]);
+            K[h] = new Vector[position + 1];
+            V[h] = new Vector[position + 1];
+            AttentionWeights[h] = new double[position + 1];
+            for (int t = 0; t <= position; t++) // Autoregressive mask
             {
-                // Compute query, key, value for this head
-                Vector q = Wq[h].Multiply(inputs[pos]);
-                Vector[] k = new Vector[seqLength];
-                Vector[] v = new Vector[seqLength];
-                for (int t = 0; t <= pos; t++) // Autoregressive mask
-                {
-                    k[t] = Wk[h].Multiply(inputs[t]);
-                    v[t] = Wv[h].Multiply(inputs[t]);
-                }
+                K[h][t] = Wk[h].Multiply(inputs[t]);
+                V[h][t] = Wv[h].Multiply(inputs[t]);
+            }
 
-                // Compute attention scores
-                double[] scores = new double[pos + 1];
-                for (int t = 0; t <= pos; t++)
-                {
-                    scores[t] = q.Dot(k[t]) / Math.Sqrt(HeadDim);
-                }
+            // Compute attention scores
+            double[] scores = new double[position + 1];
+            for (int t = 0; t <= position; t++)
+            {
+                scores[t] = Q[h].Dot(K[h][t]) / Math.Sqrt(HeadDim);
+            }
 
-                // Apply softmax
-                double maxScore = double.MinValue;
-                for (int t = 0; t <= pos; t++)
-                {
-                    if (scores[t] > maxScore) maxScore = scores[t];
-                }
+            // Apply softmax
+            double maxScore = double.MinValue;
+            for (int t = 0; t <= position; t++)
+            {
+                if (scores[t] > maxScore) maxScore = scores[t];
+            }
 
-                double sumExp = 0.0;
-                for (int t = 0; t <= pos; t++)
-                {
-                    scores[t] = Math.Exp(scores[t] - maxScore);
-                    sumExp += scores[t];
-                }
+            double sumExp = 0.0;
+            for (int t = 0; t <= position; t++)
+            {
+                scores[t] = Math.Exp(scores[t] - maxScore);
+                sumExp += scores[t];
+            }
 
-                for (int t = 0; t <= pos; t++)
-                {
-                    scores[t] /= sumExp;
-                }
+            for (int t = 0; t <= position; t++)
+            {
+                scores[t] /= sumExp;
+            }
+            AttentionWeights[h] = scores;
 
-                // Compute weighted sum of values
-                Vector headOutput = new Vector(HeadDim);
-                for (int t = 0; t <= pos; t++)
-                {
-                    for (int i = 0; i < HeadDim; i++)
-                    {
-                        headOutput.Data[i] += scores[t] * v[t].Data[i];
-                    }
-                }
-
-                // Concatenate head outputs
+            // Compute weighted sum of values
+            Vector headOutput = new Vector(HeadDim);
+            for (int t = 0; t <= position; t++)
+            {
                 for (int i = 0; i < HeadDim; i++)
                 {
-                    concatHeads.Data[h * HeadDim + i] = headOutput.Data[i];
+                    headOutput.Data[i] += scores[t] * V[h][t].Data[i];
                 }
             }
 
-            // Apply Wo
-            outputs[pos] = Wo.Multiply(concatHeads);
+            // Concatenate head outputs
+            for (int i = 0; i < HeadDim; i++)
+            {
+                concatHeads.Data[h * HeadDim + i] = headOutput.Data[i];
+            }
         }
 
-        // Return the last output (since we're predicting next token)
-        return outputs[seqLength - 1];
+        // Apply Wo
+        Vector output = Wo.Multiply(concatHeads);
+        return output;
+    }
+
+    public Vector Backward(Vector dout, int position)
+    {
+        Vector dConcatHeads = Wo.Transpose().Multiply(dout);
+        // Gradients for Wo
+        Matrix dWo = Matrix.OuterProduct(dout, dConcatHeads);
+
+        // Initialize gradients
+        Vector[] dInputs = new Vector[Inputs.Length];
+        for (int i = 0; i < Inputs.Length; i++)
+        {
+            dInputs[i] = new Vector(EmbeddingDim);
+        }
+
+        // Backpropagate through heads
+        for (int h = 0; h < NumHeads; h++)
+        {
+            Vector dHeadOutput = new Vector(HeadDim);
+            for (int i = 0; i < HeadDim; i++)
+            {
+                dHeadOutput.Data[i] = dConcatHeads.Data[h * HeadDim + i];
+            }
+
+            // Backprop through weighted sum of values
+            Vector[] dV = new Vector[position + 1];
+            double[] dScores = new double[position + 1];
+            for (int t = 0; t <= position; t++)
+            {
+                dV[t] = new Vector(HeadDim);
+            }
+
+            for (int t = 0; t <= position; t++)
+            {
+                double attnWeight = AttentionWeights[h][t];
+                for (int i = 0; i < HeadDim; i++)
+                {
+                    dV[t].Data[i] += dHeadOutput.Data[i] * attnWeight;
+                }
+            }
+
+            // Backprop through attention weights
+            for (int t = 0; t <= position; t++)
+            {
+                double attnWeight = AttentionWeights[h][t];
+                dScores[t] = 0.0;
+                for (int i = 0; i < HeadDim; i++)
+                {
+                    dScores[t] += dHeadOutput.Data[i] * V[h][t].Data[i];
+                }
+                dScores[t] *= attnWeight;
+            }
+
+            // Backprop through scores to Q, K
+            Vector dQ = new Vector(HeadDim);
+            Vector[] dK = new Vector[position + 1];
+            for (int t = 0; t <= position; t++)
+            {
+                dK[t] = new Vector(HeadDim);
+            }
+
+            for (int t = 0; t <= position; t++)
+            {
+                double scale = 1.0 / Math.Sqrt(HeadDim);
+                for (int i = 0; i < HeadDim; i++)
+                {
+                    double temp = dScores[t] * scale;
+                    dQ.Data[i] += temp * K[h][t].Data[i];
+                    dK[t].Data[i] += temp * Q[h].Data[i];
+                }
+            }
+
+            // Backprop through linear layers Wq, Wk, Wv
+            Vector dInputQ = Wq[h].Transpose().Multiply(dQ);
+            Matrix dWq = Matrix.OuterProduct(dQ, Inputs[position]);
+
+            for (int t = 0; t <= position; t++)
+            {
+                Vector dInputK = Wk[h].Transpose().Multiply(dK[t]);
+                Vector dInputV = Wv[h].Transpose().Multiply(dV[t]);
+                Matrix dWk = Matrix.OuterProduct(dK[t], Inputs[t]);
+                Matrix dWv = Matrix.OuterProduct(dV[t], Inputs[t]);
+
+                // Accumulate gradients
+                dInputs[t] = dInputs[t] + dInputK + dInputV;
+                // Update Wk[h] and Wv[h]
+                for (int r = 0; r < Wk[h].Rows; r++)
+                for (int c = 0; c < Wk[h].Cols; c++)
+                {
+                    Wk[h].Data[r][c] -= dWk.Data[r][c];
+                    Wv[h].Data[r][c] -= dWv.Data[r][c];
+                }
+            }
+
+            dInputs[position] = dInputs[position] + dInputQ;
+            // Update Wq[h]
+            for (int r = 0; r < Wq[h].Rows; r++)
+            for (int c = 0; c < Wq[h].Cols; c++)
+            {
+                Wq[h].Data[r][c] -= dWq.Data[r][c];
+            }
+        }
+
+        // Update Wo
+        for (int r = 0; r < Wo.Rows; r++)
+        for (int c = 0; c < Wo.Cols; c++)
+        {
+            Wo.Data[r][c] -= dWo.Data[r][c];
+        }
+
+        return dInputs[position];
     }
 }
 
@@ -507,6 +634,8 @@ public class FeedForwardNetwork
     public Vector b1;
     public Matrix W2;
     public Vector b2;
+    public Vector Hidden;
+    public Vector Input;
 
     public FeedForwardNetwork(int embeddingDim, int hiddenDim)
     {
@@ -539,13 +668,65 @@ public class FeedForwardNetwork
 
     public Vector Forward(Vector input)
     {
-        Vector hidden = W1.Multiply(input);
-        hidden = hidden + b1;
-        hidden.ApplyFunction(x => Math.Max(0, x)); // ReLU activation
+        Input = input.Clone();
+        Hidden = W1.Multiply(Input);
+        Hidden = Hidden + b1;
+        // ReLU activation
+        for (int i = 0; i < Hidden.Size; i++)
+        {
+            Hidden.Data[i] = Math.Max(0, Hidden.Data[i]);
+        }
 
-        Vector output = W2.Multiply(hidden);
+        Vector output = W2.Multiply(Hidden);
         output = output + b2;
         return output;
+    }
+
+    public Vector Backward(Vector dout)
+    {
+        Vector dHidden = W2.Transpose().Multiply(dout);
+        // Gradients for W2 and b2
+        Matrix dW2 = Matrix.OuterProduct(dout, Hidden);
+        Vector db2 = dout.Clone();
+
+        // Backprop through ReLU
+        for (int i = 0; i < dHidden.Size; i++)
+        {
+            if (Hidden.Data[i] <= 0)
+            {
+                dHidden.Data[i] = 0;
+            }
+        }
+
+        // Gradients for W1 and b1
+        Matrix dW1 = Matrix.OuterProduct(dHidden, Input);
+        Vector db1 = dHidden.Clone();
+        Vector dx = W1.Transpose().Multiply(dHidden);
+
+        // Update parameters
+        for (int r = 0; r < W1.Rows; r++)
+        for (int c = 0; c < W1.Cols; c++)
+        {
+            W1.Data[r][c] -= dW1.Data[r][c];
+        }
+
+        for (int i = 0; i < b1.Size; i++)
+        {
+            b1.Data[i] -= db1.Data[i];
+        }
+
+        for (int r = 0; r < W2.Rows; r++)
+        for (int c = 0; c < W2.Cols; c++)
+        {
+            W2.Data[r][c] -= dW2.Data[r][c];
+        }
+
+        for (int i = 0; i < b2.Size; i++)
+        {
+            b2.Data[i] -= db2.Data[i];
+        }
+
+        return dx;
     }
 }
 
@@ -556,6 +737,10 @@ public class TransformerBlock
     public LayerNormalization LayerNorm1;
     public FeedForwardNetwork FFN;
     public LayerNormalization LayerNorm2;
+    public Vector Input;
+    public Vector AttnOutput;
+    public Vector FFNOutput;
+    public int Position;
 
     public TransformerBlock(int embeddingDim, int numHeads, int hiddenDim)
     {
@@ -567,21 +752,51 @@ public class TransformerBlock
 
     public Vector Forward(Vector[] inputs, int position)
     {
+        Input = inputs[position].Clone();
+        Position = position;
         // Self-Attention
-        Vector attnOutput = MHA.Forward(inputs);
+        AttnOutput = MHA.Forward(inputs, position);
 
         // Residual Connection and Layer Norm
-        Vector x = inputs[position] + attnOutput;
-        x = LayerNorm1.Normalize(x);
+        Vector x = Input + AttnOutput;
+        x = LayerNorm1.Forward(x);
 
         // Feed-Forward Network
-        Vector ffnOutput = FFN.Forward(x);
+        FFNOutput = FFN.Forward(x);
 
         // Residual Connection and Layer Norm
-        x = x + ffnOutput;
-        x = LayerNorm2.Normalize(x);
+        x = x + FFNOutput;
+        x = LayerNorm2.Forward(x);
 
         return x;
+    }
+
+    public Vector Backward(Vector dout)
+    {
+        // Backward through Layer Norm 2
+        Vector dLN2 = LayerNorm2.Backward(dout);
+
+        // Backward through residual connection
+        Vector dFFNOutput = dLN2.Clone();
+        Vector dResidual = dLN2.Clone();
+
+        // Backward through Feed-Forward Network
+        Vector dFFNInput = FFN.Backward(dFFNOutput);
+
+        // Backward through Layer Norm 1
+        Vector dLN1 = LayerNorm1.Backward(dFFNInput + dResidual);
+
+        // Backward through residual connection
+        Vector dAttnOutput = dLN1.Clone();
+        Vector dInput = dLN1.Clone();
+
+        // Backward through Multi-Head Attention
+        Vector dMHAInput = MHA.Backward(dAttnOutput, Position);
+
+        // Sum gradients
+        dInput = dInput + dMHAInput;
+
+        return dInput;
     }
 }
 
@@ -597,6 +812,7 @@ public class TransformerModel
     public PositionalEncoding PosEncoding;
     public TransformerBlock[] Layers;
     public Matrix ClassificationLayer;
+    public Vector[] Embeddings;
 
     public TransformerModel(int vocabSize, int embeddingDim, int numHeads, int hiddenDim, int numLayers)
     {
@@ -628,25 +844,67 @@ public class TransformerModel
     public Vector Forward(int[] inputTokens)
     {
         int seqLength = inputTokens.Length;
-        Vector[] embeddings = new Vector[seqLength];
+        Embeddings = new Vector[seqLength];
         for (int i = 0; i < seqLength; i++)
         {
-            embeddings[i] = Embedding.GetEmbedding(inputTokens[i]);
-            PosEncoding.ApplyRoPE(embeddings[i], i);
+            Vector embedding = Embedding.GetEmbedding(inputTokens[i]);
+            embedding = PosEncoding.ApplyRoPE(embedding, i);
+            Embeddings[i] = embedding;
         }
 
         for (int l = 0; l < NumLayers; l++)
         {
             for (int i = 0; i < seqLength; i++)
             {
-                embeddings[i] = Layers[l].Forward(embeddings, i);
+                Embeddings[i] = Layers[l].Forward(Embeddings, i);
             }
         }
 
         // Use the last token's embedding for classification
-        Vector logits = ClassificationLayer.Multiply(embeddings[seqLength - 1]);
+        Vector logits = ClassificationLayer.Multiply(Embeddings[seqLength - 1]);
 
         return logits;
+    }
+
+    public Vector Backward(Vector dLogits, int[] inputTokens)
+    {
+        // Backprop through classification layer
+        Vector dLastEmbedding = ClassificationLayer.Transpose().Multiply(dLogits);
+
+        // Gradient for classification layer
+        Matrix dClassificationLayer = Matrix.OuterProduct(dLogits, Embeddings[inputTokens.Length - 1]);
+
+        // Update classification layer
+        for (int r = 0; r < ClassificationLayer.Rows; r++)
+        for (int c = 0; c < ClassificationLayer.Cols; c++)
+        {
+            ClassificationLayer.Data[r][c] -= dClassificationLayer.Data[r][c];
+        }
+
+        // Backprop through transformer layers
+        Vector[] dEmbeddings = new Vector[inputTokens.Length];
+        for (int i = 0; i < inputTokens.Length; i++)
+        {
+            dEmbeddings[i] = new Vector(EmbeddingDim);
+        }
+
+        dEmbeddings[inputTokens.Length - 1] = dLastEmbedding;
+
+        for (int l = NumLayers - 1; l >= 0; l--)
+        {
+            for (int i = inputTokens.Length - 1; i >= 0; i--)
+            {
+                dEmbeddings[i] = Layers[l].Backward(dEmbeddings[i]);
+            }
+        }
+
+        // Backprop through embedding layer
+        for (int i = 0; i < inputTokens.Length; i++)
+        {
+            Embedding.Backward(inputTokens[i], dEmbeddings[i]);
+        }
+
+        return null; // No need to return anything
     }
 
     public Vector Softmax(Vector logits)
@@ -678,33 +936,12 @@ public class TransformerModel
         double loss = -Math.Log(probs.Data[targetIndex] + 1e-9);
         return loss;
     }
-}
 
-// Optimizer (Stochastic Gradient Descent)
-public class SGDOptimizer
-{
-    public double LearningRate;
-
-    public SGDOptimizer(double learningRate)
+    public Vector ComputeLossGradient(Vector probs, int targetIndex)
     {
-        LearningRate = learningRate;
-    }
-
-    public void UpdateParameters(Vector param, Vector grad)
-    {
-        for (int i = 0; i < param.Size; i++)
-        {
-            param.Data[i] -= LearningRate * grad.Data[i];
-        }
-    }
-
-    public void UpdateParameters(Matrix param, Matrix grad)
-    {
-        for (int i = 0; i < param.Rows; i++)
-        for (int j = 0; j < param.Cols; j++)
-        {
-            param.Data[i][j] -= LearningRate * grad.Data[i][j];
-        }
+        Vector grad = probs.Clone();
+        grad.Data[targetIndex] -= 1.0;
+        return grad;
     }
 }
 
@@ -712,12 +949,12 @@ public class SGDOptimizer
 public class Trainer
 {
     public TransformerModel Model;
-    public SGDOptimizer Optimizer;
+    public double LearningRate;
 
     public Trainer(TransformerModel model, double learningRate)
     {
         Model = model;
-        Optimizer = new SGDOptimizer(learningRate);
+        LearningRate = learningRate;
     }
 
     public void Train(int[][] inputSequences, int[] targetTokens, int epochs)
@@ -729,16 +966,20 @@ public class Trainer
 
             for (int i = 0; i < inputSequences.Length; i++)
             {
+                // Forward pass
                 Vector logits = Model.Forward(inputSequences[i]);
                 Vector probs = Model.Softmax(logits);
                 double loss = Model.ComputeLoss(probs, targetTokens[i]);
                 totalLoss += loss;
                 totalTokens++;
 
-                // Backpropagation would go here
-                // Update parameters using optimizer
+                // Backward pass
+                Vector dLoss = Model.ComputeLossGradient(probs, targetTokens[i]);
+                Model.Backward(dLoss, inputSequences[i]);
 
-                // For simplicity, we are not implementing backward pass in detail
+                // Update parameters
+                Model.Embedding.UpdateParameters(LearningRate);
+                // Other parameters are updated within their respective backward methods
             }
 
             double perplexity = Math.Exp(totalLoss / totalTokens);
@@ -766,9 +1007,10 @@ public class Trainer
     }
 }
 
-class Program
+// Main Program
+class MinGPT5Test
 {
-    static void Main(string[] args)
+    static void run()
     {
         // Sample vocabulary and data
         int vocabSize = 1000;
@@ -784,7 +1026,7 @@ class Program
         int[] targetTokens = new int[] { 4, 5, 6 };
 
         TransformerModel model = new TransformerModel(vocabSize, embeddingDim, numHeads, hiddenDim, numLayers);
-        Trainer trainer = new Trainer(model, 0.01);
+        Trainer trainer = new Trainer(model, 0.001);
 
         trainer.Train(inputSequences, targetTokens, epochs: 10);
 
