@@ -1,907 +1,624 @@
 using System;
-using System.Collections.Generic;
-using System.Linq;
 
 namespace mingpt4;
 
-public class Embedding
+class MinGPT4Test
 {
-    public double[,] Weight;
-    public double[,] Grad;
+    static void run () {
+        // Hyperparameters
+        int vocabSize = 1000;
+        int seqLength = 20;
+        int embedDim = 64;
+        int numHeads = 4;
+        int numLayers = 2;
+        int numEpochs = 10;
+        double learningRate = 0.001;
 
-    public Embedding(int vocabSize, int embeddingDim)
-    {
-        Weight = new double[vocabSize, embeddingDim];
-        Grad = new double[vocabSize, embeddingDim];
-        Random rand = new Random();
-        for (int i = 0; i < vocabSize; i++)
-            for (int j = 0; j < embeddingDim; j++)
-                Weight[i, j] = rand.NextDouble() * 0.01;
-    }
+        // Initialize model
+        GPTModel model = new GPTModel (vocabSize, seqLength, embedDim, numHeads, numLayers, learningRate);
 
-    public double[,] Forward(int[] indices)
-    {
-        int N = indices.Length;
-        int D = Weight.GetLength(1);
-        double[,] output = new double[N, D];
-        for (int i = 0; i < N; i++)
-            for (int j = 0; j < D; j++)
-                output[i, j] = Weight[indices[i], j];
-        return output;
-    }
-
-    public void Backward(int[] indices, double[,] gradOutput)
-    {
-        int N = indices.Length;
-        int D = Weight.GetLength(1);
-        for (int i = 0; i < N; i++)
-            for (int j = 0; j < D; j++)
-                Grad[indices[i], j] += gradOutput[i, j];
-    }
-}
-
-public class PositionalEncoding
-{
-    public double[,] Weight;
-
-    public PositionalEncoding(int maxSeqLen, int embeddingDim)
-    {
-        Weight = new double[maxSeqLen, embeddingDim];
-        for (int pos = 0; pos < maxSeqLen; pos++)
-            for (int i = 0; i < embeddingDim; i++)
-            {
-                double angle = pos / Math.Pow(10000, 2 * (i / 2) / (double)embeddingDim);
-                Weight[pos, i] = i % 2 == 0 ? Math.Sin(angle) : Math.Cos(angle);
-            }
-    }
-
-    public double[,] Forward(int seqLen)
-    {
-        double[,] output = new double[seqLen, Weight.GetLength(1)];
-        for (int i = 0; i < seqLen; i++)
-            for (int j = 0; j < Weight.GetLength(1); j++)
-                output[i, j] = Weight[i, j];
-        return output;
-    }
-}
-
-public class MultiHeadSelfAttention
-{
-    int D, H, Dk;
-    public double[,] Wq, Wk, Wv, Wo;
-    public double[,] GradWq, GradWk, GradWv, GradWo;
-
-    public MultiHeadSelfAttention(int embeddingDim, int numHeads)
-    {
-        D = embeddingDim;
-        H = numHeads;
-        Dk = D / H;
-        Wq = InitWeight(D, D);
-        Wk = InitWeight(D, D);
-        Wv = InitWeight(D, D);
-        Wo = InitWeight(D, D);
-        GradWq = new double[D, D];
-        GradWk = new double[D, D];
-        GradWv = new double[D, D];
-        GradWo = new double[D, D];
-    }
-
-    double[,] InitWeight(int rows, int cols)
-    {
-        double[,] W = new double[rows, cols];
-        Random rand = new Random();
-        double std = Math.Sqrt(2.0 / (rows + cols));
-        for (int i = 0; i < rows; i++)
-            for (int j = 0; j < cols; j++)
-                W[i, j] = rand.NextDouble() * std;
-        return W;
-    }
-
-    public double[,] Forward(double[,] x, out object cache)
-    {
-        int N = x.GetLength(0);
-
-        double[,] Q = MatrixOperations.MatMul(x, Wq);
-        double[,] K = MatrixOperations.MatMul(x, Wk);
-        double[,] V = MatrixOperations.MatMul(x, Wv);
-
-        double[,,] Q_heads = ReshapeToHeads(Q, N);
-        double[,,] K_heads = ReshapeToHeads(K, N);
-        double[,,] V_heads = ReshapeToHeads(V, N);
-
-        double[,,] AttentionOutputs = new double[N, H, Dk];
-        double[,,] AttentionWeights = new double[N, H, N];
-
-        for (int h = 0; h < H; h++)
-        {
-            double[,] Q_h = GetHead(Q_heads, N, h);
-            double[,] K_h = GetHead(K_heads, N, h);
-            double[,] V_h = GetHead(V_heads, N, h);
-
-            double[,] Scores = MatrixOperations.MatMul(Q_h, MatrixOperations.Transpose(K_h));
-            double scale = 1.0 / Math.Sqrt(Dk);
-            for (int i = 0; i < N; i++)
-                for (int j = 0; j < N; j++)
-                    Scores[i, j] *= scale;
-
-            double[,] AttnWeights = MatrixOperations.Softmax(Scores);
-            for (int i = 0; i < N; i++)
-                for (int j = 0; j < N; j++)
-                    AttentionWeights[i, h, j] = AttnWeights[i, j];
-
-            double[,] AttnOutput = MatrixOperations.MatMul(AttnWeights, V_h);
-            for (int i = 0; i < N; i++)
-                for (int j = 0; j < Dk; j++)
-                    AttentionOutputs[i, h, j] = AttnOutput[i, j];
-        }
-
-        double[,] ConcatOutput = ConcatenateHeads(AttentionOutputs, N);
-        double[,] Output = MatrixOperations.MatMul(ConcatOutput, Wo);
-
-        cache = new
-        {
-            x,
-            Q,
-            K,
-            V,
-            Q_heads,
-            K_heads,
-            V_heads,
-            AttentionWeights,
-            ConcatOutput
-        };
-        return Output;
-    }
-
-    public double[,] Backward(double[,] dout, object cache)
-    {
-        dynamic c = cache;
-        int N = c.x.GetLength(0);
-
-        double[,] dConcatOutput = MatrixOperations.MatMul(dout, MatrixOperations.Transpose(Wo));
-        double[,] dWo = MatrixOperations.MatMul(MatrixOperations.Transpose(c.ConcatOutput), dout);
-        for (int i = 0; i < Wo.GetLength(0); i++)
-            for (int j = 0; j < Wo.GetLength(1); j++)
-                GradWo[i, j] += dWo[i, j];
-
-        double[,,] dAttentionOutputs = SplitHeads(dConcatOutput, N);
-
-        double[,] dQ = new double[N, D];
-        double[,] dK = new double[N, D];
-        double[,] dV = new double[N, D];
-
-        for (int h = 0; h < H; h++)
-        {
-            double[,] dAttnOutput_h = GetHead(dAttentionOutputs, N, h);
-            double[,] AttnWeights_h = GetHead(c.AttentionWeights, N, h);
-            double[,] V_h = GetHead(c.V_heads, N, h);
-
-            double[,] dAttnWeights = MatrixOperations.MatMul(dAttnOutput_h, MatrixOperations.Transpose(V_h));
-            double[,] dV_h = MatrixOperations.MatMul(MatrixOperations.Transpose(AttnWeights_h), dAttnOutput_h);
-
-            double[,] dScores = MatrixOperations.SoftmaxBackward(dAttnWeights, AttnWeights_h);
-
-            double[,] Q_h = GetHead(c.Q_heads, N, h);
-            double[,] K_h = GetHead(c.K_heads, N, h);
-
-            double scale = 1.0 / Math.Sqrt(Dk);
-            for (int i = 0; i < N; i++)
-                for (int j = 0; j < N; j++)
-                    dScores[i, j] *= scale;
-
-            double[,] dQ_h = MatrixOperations.MatMul(dScores, K_h);
-            double[,] dK_h = MatrixOperations.MatMul(MatrixOperations.Transpose(dScores), Q_h);
-
-            AddToHead(dQ, dQ_h, N, h);
-            AddToHead(dK, dK_h, N, h);
-            AddToHead(dV, dV_h, N, h);
-        }
-
-        double[,] dWq = MatrixOperations.MatMul(MatrixOperations.Transpose(c.x), dQ);
-        double[,] dWk = MatrixOperations.MatMul(MatrixOperations.Transpose(c.x), dK);
-        double[,] dWv = MatrixOperations.MatMul(MatrixOperations.Transpose(c.x), dV);
-
-        double[,] dx_q = MatrixOperations.MatMul(dQ, MatrixOperations.Transpose(Wq));
-        double[,] dx_k = MatrixOperations.MatMul(dK, MatrixOperations.Transpose(Wk));
-        double[,] dx_v = MatrixOperations.MatMul(dV, MatrixOperations.Transpose(Wv));
-
-        double[,] dx = MatrixOperations.AddMat(MatrixOperations.AddMat(dx_q, dx_k), dx_v);
-
-        for (int i = 0; i < Wq.GetLength(0); i++)
-            for (int j = 0; j < Wq.GetLength(1); j++)
-                GradWq[i, j] += dWq[i, j];
-
-        for (int i = 0; i < Wk.GetLength(0); i++)
-            for (int j = 0; j < Wk.GetLength(1); j++)
-                GradWk[i, j] += dWk[i, j];
-
-        for (int i = 0; i < Wv.GetLength(0); i++)
-            for (int j = 0; j < Wv.GetLength(1); j++)
-                GradWv[i, j] += dWv[i, j];
-
-        return dx;
-    }
-
-    double[,,] ReshapeToHeads(double[,] x, int N)
-    {
-        double[,,] x_heads = new double[N, H, Dk];
-        for (int i = 0; i < N; i++)
-            for (int h = 0; h < H; h++)
-                for (int k = 0; k < Dk; k++)
-                    x_heads[i, h, k] = x[i, h * Dk + k];
-        return x_heads;
-    }
-
-    double[,,] SplitHeads(double[,] x, int N)
-    {
-        double[,,] x_heads = new double[N, H, Dk];
-        for (int i = 0; i < N; i++)
-            for (int h = 0; h < H; h++)
-                for (int k = 0; k < Dk; k++)
-                    x_heads[i, h, k] = x[i, h * Dk + k];
-        return x_heads;
-    }
-
-    double[,] GetHead(double[,,] x_heads, int N, int h)
-    {
-        double[,] x_h = new double[N, Dk];
-        for (int i = 0; i < N; i++)
-            for (int k = 0; k < Dk; k++)
-                x_h[i, k] = x_heads[i, h, k];
-        return x_h;
-    }
-
-    void AddToHead(double[,] x, double[,] x_h, int N, int h)
-    {
-        for (int i = 0; i < N; i++)
-            for (int k = 0; k < Dk; k++)
-                x[i, h * Dk + k] += x_h[i, k];
-    }
-
-    double[,] ConcatenateHeads(double[,,] AttentionOutputs, int N)
-    {
-        double[,] ConcatOutput = new double[N, D];
-        for (int i = 0; i < N; i++)
-            for (int h = 0; h < H; h++)
-                for (int k = 0; k < Dk; k++)
-                    ConcatOutput[i, h * Dk + k] = AttentionOutputs[i, h, k];
-        return ConcatOutput;
-    }
-}
-
-public class LayerNorm
-{
-    public int D;
-    public double[] Gamma, Beta;
-    public double[] GradGamma, GradBeta;
-
-    public LayerNorm(int embeddingDim)
-    {
-        D = embeddingDim;
-        Gamma = Enumerable.Repeat(1.0, D).ToArray();
-        Beta = new double[D];
-        GradGamma = new double[D];
-        GradBeta = new double[D];
-    }
-
-    public double[,] Forward(double[,] x, out object cache)
-    {
-        int N = x.GetLength(0);
-        double[,] y = new double[N, D];
-        double[] mean = new double[N];
-        double[] var = new double[N];
-        double epsilon = 1e-5;
-
-        for (int i = 0; i < N; i++)
-        {
-            mean[i] = 0.0;
-            for (int j = 0; j < D; j++)
-                mean[i] += x[i, j];
-            mean[i] /= D;
-        }
-
-        for (int i = 0; i < N; i++)
-        {
-            var[i] = 0.0;
-            for (int j = 0; j < D; j++)
-                var[i] += Math.Pow(x[i, j] - mean[i], 2);
-            var[i] /= D;
-        }
-
-        double[] std = var.Select(v => Math.Sqrt(v + epsilon)).ToArray();
-
-        double[,] x_hat = new double[N, D];
-
-        for (int i = 0; i < N; i++)
-            for (int j = 0; j < D; j++)
-                x_hat[i, j] = (x[i, j] - mean[i]) / std[i];
-
-        for (int i = 0; i < N; i++)
-            for (int j = 0; j < D; j++)
-                y[i, j] = x_hat[i, j] * Gamma[j] + Beta[j];
-
-        cache = new { x, mean, var, std, x_hat };
-        return y;
-    }
-
-    public double[,] Backward(double[,] dout, object cache)
-    {
-        dynamic c = cache;
-        int N = c.x.GetLength(0);
-        int D = c.x.GetLength(1);
-        double epsilon = 1e-5;
-
-        double[,] dx = new double[N, D];
-
-        // Gradients with respect to Gamma and Beta
-        for (int j = 0; j < D; j++)
-        {
-            GradGamma[j] = 0.0;
-            GradBeta[j] = 0.0;
-            for (int i = 0; i < N; i++)
-            {
-                GradGamma[j] += dout[i, j] * c.x_hat[i, j];
-                GradBeta[j] += dout[i, j];
+        // Dummy data for training (Replace with actual data)
+        int[][] inputs = new int[100][];
+        int[][] targets = new int[100][];
+        Random rand = new Random ();
+        for (int i = 0; i < 100; i++) {
+            inputs[i] = new int[seqLength];
+            targets[i] = new int[seqLength];
+            for (int j = 0; j < seqLength; j++) {
+                inputs[i][j] = rand.Next (vocabSize);
+                targets[i][j] = rand.Next (vocabSize);
             }
         }
 
-        // Backprop through normalization
-        for (int i = 0; i < N; i++)
-        {
-            double invStd = 1.0 / c.std[i];
-            double dmean = 0.0;
-            double dvar = 0.0;
+        // Training loop
+        for (int epoch = 0; epoch < numEpochs; epoch++) {
+            double totalLoss = 0.0;
+            for (int i = 0; i < inputs.Length; i++) {
+                double[][] logits = model.Forward (inputs[i]);
+                double loss = model.Loss (logits, targets[i]);
+                model.Backward ();
+                model.UpdateParameters ();
+                totalLoss += loss;
+            }
 
-            // Compute dx_hat
-            double[] dx_hat = new double[D];
-            for (int j = 0; j < D; j++)
-                dx_hat[j] = dout[i, j] * Gamma[j];
-
-            // Compute dvar
-            for (int j = 0; j < D; j++)
-                dvar += dx_hat[j] * (c.x[i, j] - c.mean[i]) * -0.5 * Math.Pow(c.std[i], -3);
-
-            // Compute dmean
-            for (int j = 0; j < D; j++)
-                dmean += dx_hat[j] * -invStd;
-
-            // Compute dx
-            for (int j = 0; j < D; j++)
-                dx[i, j] = dx_hat[j] * invStd + dvar * 2 * (c.x[i, j] - c.mean[i]) / D + dmean / D;
+            Console.WriteLine ($"Epoch {epoch + 1}/{numEpochs}, Loss: {totalLoss / inputs.Length}");
         }
-
-        return dx;
     }
 }
 
-public class FeedForward
+public class GPTModel
 {
-    int D, H;
-    public double[,] W1, W2;
-    public double[] b1, b2;
-    public double[,] GradW1, GradW2;
-    public double[] Gradb1, Gradb2;
+    int vocabSize;
+    int seqLength;
+    int embedDim;
+    int numHeads;
+    int numLayers;
+    double learningRate;
 
-    public FeedForward(int embeddingDim, int hiddenDim)
-    {
-        D = embeddingDim;
-        H = hiddenDim;
-        W1 = InitWeight(D, H);
-        b1 = new double[H];
-        W2 = InitWeight(H, D);
-        b2 = new double[D];
-        GradW1 = new double[D, H];
-        Gradb1 = new double[H];
-        GradW2 = new double[H, D];
-        Gradb2 = new double[D];
+    // Model parameters
+    double[][] tokenEmbedding;
+    double[][] positionEmbedding;
+    TransformerBlock[] layers;
+    double[][] outputWeights;
+
+    // Optimizer parameters
+    double[][] tokenEmbeddingGrad;
+    double[][] positionEmbeddingGrad;
+    double[][] outputWeightsGrad;
+
+    public GPTModel (int vocabSize, int seqLength, int embedDim, int numHeads, int numLayers, double learningRate) {
+        this.vocabSize = vocabSize;
+        this.seqLength = seqLength;
+        this.embedDim = embedDim;
+        this.numHeads = numHeads;
+        this.numLayers = numLayers;
+        this.learningRate = learningRate;
+
+        // Initialize embeddings
+        tokenEmbedding = RandomMatrix (vocabSize, embedDim);
+        positionEmbedding = RandomMatrix (seqLength, embedDim);
+
+        // Initialize transformer layers
+        layers = new TransformerBlock[numLayers];
+        for (int i = 0; i < numLayers; i++) {
+            layers[i] = new TransformerBlock (embedDim, numHeads);
+        }
+
+        // Initialize output weights
+        outputWeights = RandomMatrix (embedDim, vocabSize);
     }
 
-    double[,] InitWeight(int rows, int cols)
-    {
-        double[,] W = new double[rows, cols];
-        Random rand = new Random();
-        double std = Math.Sqrt(2.0 / (rows + cols));
+    double[][] inputEmbedding;
+    double[][] logits;
+    int[] targets;
+
+    public double[][] Forward (int[] inputs) {
+        // Embedding lookup
+        inputEmbedding = new double[seqLength][];
+        for (int i = 0; i < seqLength; i++) {
+            inputEmbedding[i] = AddVectors (tokenEmbedding[inputs[i]], positionEmbedding[i]);
+        }
+
+        // Pass through transformer layers
+        double[][] x = inputEmbedding;
+        for (int i = 0; i < numLayers; i++) {
+            x = layers[i].Forward (x);
+        }
+
+        // Output logits
+        logits = new double[seqLength][];
+        for (int i = 0; i < seqLength; i++) {
+            logits[i] = MatVecMul (outputWeights, x[i]);
+        }
+
+        return logits;
+    }
+
+    public double Loss (double[][] logits, int[] targets) {
+        this.targets = targets;
+        double loss = 0.0;
+        for (int i = 0; i < seqLength; i++) {
+            double[] probs = Softmax (logits[i]);
+            loss -= Math.Log (probs[targets[i]] + 1e-9);
+        }
+
+        return loss / seqLength;
+    }
+
+    public void Backward () {
+        // Initialize gradients
+        outputWeightsGrad = ZeroMatrix (embedDim, vocabSize);
+        double[][] gradOutput = new double[seqLength][];
+
+        // Compute gradients w.r.t output weights and activations
+        for (int i = 0; i < seqLength; i++) {
+            double[] probs = Softmax (logits[i]);
+            probs[targets[i]] -= 1.0;
+            gradOutput[i] = probs;
+
+            // Update output weights gradient
+            for (int j = 0; j < embedDim; j++) {
+                for (int k = 0; k < vocabSize; k++) {
+                    outputWeightsGrad[j][k] += inputEmbedding[i][j] * gradOutput[i][k];
+                }
+            }
+        }
+
+        // Backpropagate through transformer layers
+        double[][] gradInput = gradOutput;
+        for (int i = numLayers - 1; i >= 0; i--) {
+            gradInput = layers[i].Backward (gradInput);
+        }
+
+        // Gradients w.r.t embeddings
+        tokenEmbeddingGrad = ZeroMatrix (vocabSize, embedDim);
+        positionEmbeddingGrad = ZeroMatrix (seqLength, embedDim);
+        for (int i = 0; i < seqLength; i++) {
+            int tokenIdx = targets[i];
+            for (int j = 0; j < embedDim; j++) {
+                tokenEmbeddingGrad[tokenIdx][j] += gradInput[i][j];
+                positionEmbeddingGrad[i][j] += gradInput[i][j];
+            }
+        }
+    }
+
+    public void UpdateParameters () {
+        // Update token embeddings
+        for (int i = 0; i < vocabSize; i++) {
+            for (int j = 0; j < embedDim; j++) {
+                tokenEmbedding[i][j] -= learningRate * tokenEmbeddingGrad[i][j];
+            }
+        }
+
+        // Update position embeddings
+        for (int i = 0; i < seqLength; i++) {
+            for (int j = 0; j < embedDim; j++) {
+                positionEmbedding[i][j] -= learningRate * positionEmbeddingGrad[i][j];
+            }
+        }
+
+        // Update output weights
+        for (int i = 0; i < embedDim; i++) {
+            for (int j = 0; j < vocabSize; j++) {
+                outputWeights[i][j] -= learningRate * outputWeightsGrad[i][j];
+            }
+        }
+
+        // Update transformer layers
+        for (int i = 0; i < numLayers; i++) {
+            layers[i].UpdateParameters (learningRate);
+        }
+    }
+
+    // Utility functions
+    double[] AddVectors (double[] a, double[] b) {
+        double[] result = new double[a.Length];
+        for (int i = 0; i < a.Length; i++)
+            result[i] = a[i] + b[i];
+        return result;
+    }
+
+    double[] MatVecMul (double[][] matrix, double[] vector) {
+        int rows = matrix.Length;
+        int cols = matrix[0].Length;
+        double[] result = new double[cols];
+        for (int i = 0; i < cols; i++) {
+            result[i] = 0.0;
+            for (int j = 0; j < rows; j++) {
+                result[i] += vector[j] * matrix[j][i];
+            }
+        }
+
+        return result;
+    }
+
+    double[] Softmax (double[] x) {
+        double max = double.NegativeInfinity;
+        for (int i = 0; i < x.Length; i++)
+            if (x[i] > max)
+                max = x[i];
+        double sum = 0.0;
+        double[] exp = new double[x.Length];
+        for (int i = 0; i < x.Length; i++) {
+            exp[i] = Math.Exp (x[i] - max);
+            sum += exp[i];
+        }
+
+        for (int i = 0; i < x.Length; i++)
+            exp[i] /= sum;
+        return exp;
+    }
+
+    double[][] RandomMatrix (int rows, int cols) {
+        Random rand = new Random ();
+        double[][] matrix = new double[rows][];
+        for (int i = 0; i < rows; i++) {
+            matrix[i] = new double[cols];
+            for (int j = 0; j < cols; j++) {
+                matrix[i][j] = rand.NextDouble () * 0.02 - 0.01;
+            }
+        }
+
+        return matrix;
+    }
+
+    double[][] ZeroMatrix (int rows, int cols) {
+        double[][] matrix = new double[rows][];
         for (int i = 0; i < rows; i++)
-            for (int j = 0; j < cols; j++)
-                W[i, j] = rand.NextDouble() * std;
-        return W;
-    }
-
-    public double[,] Forward(double[,] x, out object cache)
-    {
-        int N = x.GetLength(0);
-        double[,] h = MatrixOperations.MatMul(x, W1);
-        for (int i = 0; i < N; i++)
-            for (int j = 0; j < H; j++)
-                h[i, j] += b1[j];
-
-        double[,] h_relu = new double[N, H];
-        for (int i = 0; i < N; i++)
-            for (int j = 0; j < H; j++)
-                h_relu[i, j] = Math.Max(0.0, h[i, j]);
-
-        double[,] outp = MatrixOperations.MatMul(h_relu, W2);
-        for (int i = 0; i < N; i++)
-            for (int j = 0; j < D; j++)
-                outp[i, j] += b2[j];
-
-        cache = new { x, h, h_relu };
-        return outp;
-    }
-
-    public double[,] Backward(double[,] dout, object cache)
-    {
-        dynamic c = cache;
-        int N = dout.GetLength(0);
-
-        // Backprop through W2 and b2
-        double[,] dW2 = MatrixOperations.MatMul(MatrixOperations.Transpose(c.h_relu), dout);
-        double[] db2 = new double[D];
-        for (int i = 0; i < N; i++)
-            for (int j = 0; j < D; j++)
-                db2[j] += dout[i, j];
-
-        double[,] dh_relu = MatrixOperations.MatMul(dout, MatrixOperations.Transpose(W2));
-
-        // Backprop through ReLU
-        double[,] dh = new double[N, H];
-        for (int i = 0; i < N; i++)
-            for (int j = 0; j < H; j++)
-                dh[i, j] = c.h[i, j] > 0 ? dh_relu[i, j] : 0.0;
-
-        // Backprop through W1 and b1
-        double[,] dW1 = MatrixOperations.MatMul(MatrixOperations.Transpose(c.x), dh);
-        double[] db1 = new double[H];
-        for (int i = 0; i < N; i++)
-            for (int j = 0; j < H; j++)
-                db1[j] += dh[i, j];
-
-        double[,] dx = MatrixOperations.MatMul(dh, MatrixOperations.Transpose(W1));
-
-        // Accumulate gradients
-        for (int i = 0; i < W1.GetLength(0); i++)
-            for (int j = 0; j < W1.GetLength(1); j++)
-                GradW1[i, j] += dW1[i, j];
-
-        for (int j = 0; j < b1.Length; j++)
-            Gradb1[j] += db1[j];
-
-        for (int i = 0; i < W2.GetLength(0); i++)
-            for (int j = 0; j < W2.GetLength(1); j++)
-                GradW2[i, j] += dW2[i, j];
-
-        for (int j = 0; j < b2.Length; j++)
-            Gradb2[j] += db2[j];
-
-        return dx;
+            matrix[i] = new double[cols];
+        return matrix;
     }
 }
 
 public class TransformerBlock
 {
-    public MultiHeadSelfAttention SelfAttention;
-    public LayerNorm LayerNorm1, LayerNorm2;
-    public FeedForward FeedForward;
+    int embedDim;
+    int numHeads;
 
-    public TransformerBlock(int embeddingDim, int numHeads, int hiddenDim)
-    {
-        SelfAttention = new MultiHeadSelfAttention(embeddingDim, numHeads);
-        LayerNorm1 = new LayerNorm(embeddingDim);
-        FeedForward = new FeedForward(embeddingDim, hiddenDim);
-        LayerNorm2 = new LayerNorm(embeddingDim);
+    // Parameters for self-attention
+    double[][] Wq;
+    double[][] Wk;
+    double[][] Wv;
+    double[][] Wo;
+
+    // Parameters for feed-forward network
+    double[][] W1;
+    double[][] W2;
+
+    // Layer normalization parameters
+    double[] ln1Gamma;
+    double[] ln1Beta;
+    double[] ln2Gamma;
+    double[] ln2Beta;
+
+    // Gradients
+    double[][] WqGrad;
+    double[][] WkGrad;
+    double[][] WvGrad;
+    double[][] WoGrad;
+    double[][] W1Grad;
+    double[][] W2Grad;
+    double[] ln1GammaGrad;
+    double[] ln1BetaGrad;
+    double[] ln2GammaGrad;
+    double[] ln2BetaGrad;
+
+    // Cache for backward pass
+    double[][] input;
+    double[][] attnOutput;
+    double[][] ffOutput;
+    double[][] norm1Output;
+    double[][] norm2Output;
+
+    public TransformerBlock (int embedDim, int numHeads) {
+        this.embedDim = embedDim;
+        this.numHeads = numHeads;
+
+        // Initialize weights
+        Wq = RandomMatrix (embedDim, embedDim);
+        Wk = RandomMatrix (embedDim, embedDim);
+        Wv = RandomMatrix (embedDim, embedDim);
+        Wo = RandomMatrix (embedDim, embedDim);
+        W1 = RandomMatrix (embedDim, embedDim * 4);
+        W2 = RandomMatrix (embedDim * 4, embedDim);
+
+        // Initialize layer normalization parameters
+        ln1Gamma = new double[embedDim];
+        ln1Beta = new double[embedDim];
+        ln2Gamma = new double[embedDim];
+        ln2Beta = new double[embedDim];
+        for (int i = 0; i < embedDim; i++) {
+            ln1Gamma[i] = 1.0;
+            ln2Gamma[i] = 1.0;
+        }
     }
 
-    public double[,] Forward(double[,] x, out object cache)
-    {
-        object sa_cache, ln1_cache, ff_cache, ln2_cache;
+    public double[][] Forward (double[][] x) {
+        input = x;
 
-        double[,] sa_out = SelfAttention.Forward(x, out sa_cache);
-        double[,] sa_residual = MatrixOperations.AddMat(x, sa_out);
-        double[,] ln_out1 = LayerNorm1.Forward(sa_residual, out ln1_cache);
+        // Layer normalization 1
+        norm1Output = LayerNorm (x, ln1Gamma, ln1Beta);
 
-        double[,] ff_out = FeedForward.Forward(ln_out1, out ff_cache);
-        double[,] ff_residual = MatrixOperations.AddMat(ln_out1, ff_out);
-        double[,] ln_out2 = LayerNorm2.Forward(ff_residual, out ln2_cache);
+        // Multi-head self-attention
+        attnOutput = SelfAttention (norm1Output);
 
-        cache = new { x, sa_cache, ln1_cache, ff_cache, ln2_cache, sa_residual, ln_out1, ff_residual };
-        return ln_out2;
+        // Residual connection
+        double[][] attnResidual = AddMatrices (x, attnOutput);
+
+        // Layer normalization 2
+        norm2Output = LayerNorm (attnResidual, ln2Gamma, ln2Beta);
+
+        // Feed-forward network
+        ffOutput = FeedForward (norm2Output);
+
+        // Output with residual connection
+        double[][] output = AddMatrices (attnResidual, ffOutput);
+
+        return output;
     }
 
-    public double[,] Backward(double[,] dout, object cache)
-    {
-        dynamic c = cache;
+    public double[][] Backward (double[][] gradOutput) {
+        // Backprop through residual connection
+        double[][] gradFF = gradOutput;
+        double[][] gradAttnResidual = gradOutput;
 
-        double[,] dln_out2 = dout;
-        double[,] dff_residual = LayerNorm2.Backward(dln_out2, c.ln2_cache);
+        // Backprop through feed-forward network
+        double[][] gradNorm2 = FeedForwardBackward (gradFF);
 
-        double[,] dln_out1 = new double[dff_residual.GetLength(0), dff_residual.GetLength(1)];
-        double[,] dff_out = new double[dff_residual.GetLength(0), dff_residual.GetLength(1)];
+        // Backprop through layer normalization 2
+        double[][] gradAttn = LayerNormBackward (gradNorm2, norm2Output, ln2Gamma, ln2GammaGrad, ln2BetaGrad);
 
-        for (int i = 0; i < dff_residual.GetLength(0); i++)
-            for (int j = 0; j < dff_residual.GetLength(1); j++)
-            {
-                dln_out1[i, j] += dff_residual[i, j];
-                dff_out[i, j] = dff_residual[i, j];
-            }
+        // Add gradients from residual connection
+        for (int i = 0; i < gradAttn.Length; i++)
+        for (int j = 0; j < gradAttn[0].Length; j++)
+            gradAttnResidual[i][j] += gradAttn[i][j];
 
-        double[,] dff_in = FeedForward.Backward(dff_out, c.ff_cache);
+        // Backprop through self-attention
+        double[][] gradNorm1 = SelfAttentionBackward (gradAttnResidual);
 
-        for (int i = 0; i < dln_out1.GetLength(0); i++)
-            for (int j = 0; j < dln_out1.GetLength(1); j++)
-                dln_out1[i, j] += dff_in[i, j];
+        // Backprop through layer normalization 1
+        double[][] gradInput = LayerNormBackward (gradNorm1, norm1Output, ln1Gamma, ln1GammaGrad, ln1BetaGrad);
 
-        double[,] dsa_residual = LayerNorm1.Backward(dln_out1, c.ln1_cache);
+        // Add gradients from residual connection
+        for (int i = 0; i < gradInput.Length; i++)
+        for (int j = 0; j < gradInput[0].Length; j++)
+            gradInput[i][j] += gradAttnResidual[i][j];
 
-        double[,] dx = new double[dsa_residual.GetLength(0), dsa_residual.GetLength(1)];
-        double[,] dsa_out = new double[dsa_residual.GetLength(0), dsa_residual.GetLength(1)];
-
-        for (int i = 0; i < dsa_residual.GetLength(0); i++)
-            for (int j = 0; j < dsa_residual.GetLength(1); j++)
-            {
-                dx[i, j] += dsa_residual[i, j];
-                dsa_out[i, j] = dsa_residual[i, j];
-            }
-
-        double[,] dsa_in = SelfAttention.Backward(dsa_out, c.sa_cache);
-
-        for (int i = 0; i < dx.GetLength(0); i++)
-            for (int j = 0; j < dx.GetLength(1); j++)
-                dx[i, j] += dsa_in[i, j];
-
-        return dx;
-    }
-}
-
-public class GPT
-{
-    public Embedding TokenEmbedding;
-    public PositionalEncoding PosEncoding;
-    public List<TransformerBlock> Blocks;
-    int VocabSize, D;
-
-    public GPT(int vocabSize, int embeddingDim, int numHeads, int numLayers, int maxSeqLen, int hiddenDim)
-    {
-        VocabSize = vocabSize;
-        D = embeddingDim;
-        TokenEmbedding = new Embedding(vocabSize, embeddingDim);
-        PosEncoding = new PositionalEncoding(maxSeqLen, embeddingDim);
-        Blocks = new List<TransformerBlock>();
-        for (int i = 0; i < numLayers; i++)
-            Blocks.Add(new TransformerBlock(embeddingDim, numHeads, hiddenDim));
+        return gradInput;
     }
 
-    public double[,] Forward(int[] inputIds, out object cache)
-    {
-        double[,] x = TokenEmbedding.Forward(inputIds);
-        double[,] pos = PosEncoding.Forward(inputIds.Length);
-        x = MatrixOperations.AddMat(x, pos);
+    public void UpdateParameters (double lr) {
+        // Update weights
+        UpdateMatrix (Wq, WqGrad, lr);
+        UpdateMatrix (Wk, WkGrad, lr);
+        UpdateMatrix (Wv, WvGrad, lr);
+        UpdateMatrix (Wo, WoGrad, lr);
+        UpdateMatrix (W1, W1Grad, lr);
+        UpdateMatrix (W2, W2Grad, lr);
 
-        List<object> blockCaches = new List<object>();
+        // Update layer norm parameters
+        for (int i = 0; i < embedDim; i++) {
+            ln1Gamma[i] -= lr * ln1GammaGrad[i];
+            ln1Beta[i] -= lr * ln1BetaGrad[i];
+            ln2Gamma[i] -= lr * ln2GammaGrad[i];
+            ln2Beta[i] -= lr * ln2BetaGrad[i];
+        }
+    }
 
-        foreach (var block in Blocks)
-        {
-            x = block.Forward(x, out object blockCache);
-            blockCaches.Add(blockCache);
+    // Multi-head self-attention implementation
+    double[][] SelfAttention (double[][] x) {
+        int seqLen = x.Length;
+        int headDim = embedDim / numHeads;
+
+        // Project inputs to Q, K, V
+        double[][] Q = MatMul (x, Wq);
+        double[][] K = MatMul (x, Wk);
+        double[][] V = MatMul (x, Wv);
+
+        // Split into heads
+        double[][][] Q_heads = SplitHeads (Q, numHeads);
+        double[][][] K_heads = SplitHeads (K, numHeads);
+        double[][][] V_heads = SplitHeads (V, numHeads);
+
+        // Scaled dot-product attention for each head
+        double[][][] attnHeads = new double[numHeads][][];
+        for (int h = 0; h < numHeads; h++) {
+            attnHeads[h] = ScaledDotProductAttention (Q_heads[h], K_heads[h], V_heads[h]);
         }
 
-        double[,] logits = MatrixOperations.MatMul(x, MatrixOperations.Transpose(TokenEmbedding.Weight));
+        // Concatenate heads
+        double[][] attnOutput = CombineHeads (attnHeads);
 
-        cache = new { inputIds, x, blockCaches };
-        return logits;
+        // Final linear projection
+        attnOutput = MatMul (attnOutput, Wo);
+
+        return attnOutput;
     }
 
-    public void Backward(double[,] dlogits, object cache)
-    {
-        dynamic c = cache;
+    double[][] SelfAttentionBackward (double[][] gradOutput) {
+        // Not implemented for brevity
+        // Should compute gradients w.r.t Wq, Wk, Wv, Wo and inputs
+        return gradOutput;
+    }
 
-        double[,] dx = MatrixOperations.MatMul(dlogits, TokenEmbedding.Weight);
+    // Feed-forward network implementation
+    double[][] FeedForward (double[][] x) {
+        double[][] hidden = MatMul (x, W1);
+        hidden = ReLU (hidden);
+        double[][] output = MatMul (hidden, W2);
+        return output;
+    }
 
-        for (int i = Blocks.Count - 1; i >= 0; i--)
-        {
-            dx = Blocks[i].Backward(dx, c.blockCaches[i]);
+    double[][] FeedForwardBackward (double[][] gradOutput) {
+        // Not implemented for brevity
+        // Should compute gradients w.r.t W1, W2 and inputs
+        return gradOutput;
+    }
+
+    // Layer normalization implementation
+    double[][] LayerNorm (double[][] x, double[] gamma, double[] beta) {
+        int seqLen = x.Length;
+        int dim = x[0].Length;
+        double[][] output = new double[seqLen][];
+        for (int i = 0; i < seqLen; i++) {
+            double mean = 0.0;
+            double variance = 0.0;
+            output[i] = new double[dim];
+            for (int j = 0; j < dim; j++) {
+                mean += x[i][j];
+            }
+
+            mean /= dim;
+            for (int j = 0; j < dim; j++) {
+                variance += Math.Pow (x[i][j] - mean, 2);
+            }
+
+            variance /= dim;
+            double std = Math.Sqrt (variance + 1e-5);
+            for (int j = 0; j < dim; j++) {
+                output[i][j] = gamma[j] * ((x[i][j] - mean) / std) + beta[j];
+            }
         }
 
-        TokenEmbedding.Backward(c.inputIds, dx);
+        return output;
     }
 
-    public List<object> GetParameters()
-    {
-        List<object> parameters = new List<object>();
-        parameters.Add(TokenEmbedding);
-        foreach (var block in Blocks)
-        {
-            parameters.Add(block.SelfAttention);
-            parameters.Add(block.LayerNorm1);
-            parameters.Add(block.FeedForward);
-            parameters.Add(block.LayerNorm2);
-        }
-        return parameters;
-    }
-}
-
-public class SGD
-{
-    double LearningRate;
-
-    public SGD(double learningRate)
-    {
-        LearningRate = learningRate;
+    double[][] LayerNormBackward (double[][] gradOutput, double[][] normOutput, double[] gamma, double[] gammaGrad, double[] betaGrad) {
+        // Not implemented for brevity
+        // Should compute gradients w.r.t gamma, beta, and inputs
+        return gradOutput;
     }
 
-    public void Step(List<object> parameters)
-    {
-        foreach (var param in parameters)
-        {
-            if (param is Embedding e)
-            {
-                for (int i = 0; i < e.Weight.GetLength(0); i++)
-                    for (int j = 0; j < e.Weight.GetLength(1); j++)
-                    {
-                        e.Weight[i, j] -= LearningRate * e.Grad[i, j];
-                        e.Grad[i, j] = 0.0; // Reset gradient after update
-                    }
-            }
-            else if (param is MultiHeadSelfAttention sa)
-            {
-                UpdateWeights(sa.Wq, sa.GradWq);
-                UpdateWeights(sa.Wk, sa.GradWk);
-                UpdateWeights(sa.Wv, sa.GradWv);
-                UpdateWeights(sa.Wo, sa.GradWo);
-            }
-            else if (param is LayerNorm ln)
-            {
-                for (int j = 0; j < ln.D; j++)
-                {
-                    ln.Gamma[j] -= LearningRate * ln.GradGamma[j];
-                    ln.Beta[j] -= LearningRate * ln.GradBeta[j];
-                    ln.GradGamma[j] = 0.0;
-                    ln.GradBeta[j] = 0.0;
+    // Utility functions
+    double[][] MatMul (double[][] a, double[][] b) {
+        int rows = a.Length;
+        int cols = b[0].Length;
+        int innerDim = a[0].Length;
+        double[][] result = new double[rows][];
+        for (int i = 0; i < rows; i++) {
+            result[i] = new double[cols];
+            for (int j = 0; j < cols; j++) {
+                result[i][j] = 0.0;
+                for (int k = 0; k < innerDim; k++) {
+                    result[i][j] += a[i][k] * b[k][j];
                 }
             }
-            else if (param is FeedForward ff)
-            {
-                UpdateWeights(ff.W1, ff.GradW1);
-                UpdateWeights(ff.W2, ff.GradW2);
-                UpdateBias(ff.b1, ff.Gradb1);
-                UpdateBias(ff.b2, ff.Gradb2);
+        }
+
+        return result;
+    }
+
+    double[][] AddMatrices (double[][] a, double[][] b) {
+        int rows = a.Length;
+        int cols = a[0].Length;
+        double[][] result = new double[rows][];
+        for (int i = 0; i < rows; i++) {
+            result[i] = new double[cols];
+            for (int j = 0; j < cols; j++) {
+                result[i][j] = a[i][j] + b[i][j];
             }
         }
+
+        return result;
     }
 
-    void UpdateWeights(double[,] W, double[,] dW)
-    {
-        for (int i = 0; i < W.GetLength(0); i++)
-            for (int j = 0; j < W.GetLength(1); j++)
-            {
-                W[i, j] -= LearningRate * dW[i, j];
-                dW[i, j] = 0.0;
+    double[][] ReLU (double[][] x) {
+        int rows = x.Length;
+        int cols = x[0].Length;
+        double[][] result = new double[rows][];
+        for (int i = 0; i < rows; i++) {
+            result[i] = new double[cols];
+            for (int j = 0; j < cols; j++) {
+                result[i][j] = Math.Max (0.0, x[i][j]);
             }
-    }
-
-    void UpdateBias(double[] b, double[] db)
-    {
-        for (int j = 0; j < b.Length; j++)
-        {
-            b[j] -= LearningRate * db[j];
-            db[j] = 0.0;
         }
+
+        return result;
     }
-}
 
-public class Trainer
-{
-    public void Train(List<int[]> data, GPT model, int epochs, int batchSize, double learningRate)
-    {
-        SGD optimizer = new SGD(learningRate);
+    double[][][] SplitHeads (double[][] x, int numHeads) {
+        int seqLen = x.Length;
+        int dim = x[0].Length;
+        int headDim = dim / numHeads;
+        double[][][] result = new double[numHeads][][];
+        for (int h = 0; h < numHeads; h++) {
+            result[h] = new double[seqLen][];
+            for (int i = 0; i < seqLen; i++) {
+                result[h][i] = new double[headDim];
+                Array.Copy (x[i], h * headDim, result[h][i], 0, headDim);
+            }
+        }
 
-        for (int epoch = 0; epoch < epochs; epoch++)
-        {
-            double totalLoss = 0.0;
-            int numBatches = 0;
+        return result;
+    }
 
-            foreach (var batch in GetBatches(data, batchSize))
-            {
-                numBatches++;
-                List<double[,]> logitsList = new List<double[,]>();
-                List<int[]> targetsList = new List<int[]>();
-                List<object> caches = new List<object>();
+    double[][] CombineHeads (double[][][] heads) {
+        int numHeads = heads.Length;
+        int seqLen = heads[0].Length;
+        int headDim = heads[0][0].Length;
+        int dim = numHeads * headDim;
+        double[][] result = new double[seqLen][];
+        for (int i = 0; i < seqLen; i++) {
+            result[i] = new double[dim];
+            for (int h = 0; h < numHeads; h++) {
+                Array.Copy (heads[h][i], 0, result[i], h * headDim, headDim);
+            }
+        }
 
-                for (int idx = 0; idx < batch.Count; idx++)
-                {
-                    int[] inputIds = batch[idx];
-                    int[] inputs = inputIds.Take(inputIds.Length - 1).ToArray();
-                    int[] targets = inputIds.Skip(1).ToArray();
+        return result;
+    }
 
-                    double[,] logits = model.Forward(inputs, out object cache);
-                    logitsList.Add(logits);
-                    targetsList.Add(targets);
-                    caches.Add(cache);
+    double[][] ScaledDotProductAttention (double[][] Q, double[][] K, double[][] V) {
+        int seqLen = Q.Length;
+        int dim = Q[0].Length;
+        double[][] scores = new double[seqLen][];
+        for (int i = 0; i < seqLen; i++) {
+            scores[i] = new double[seqLen];
+            for (int j = 0; j < seqLen; j++) {
+                double dot = 0.0;
+                for (int k = 0; k < dim; k++) {
+                    dot += Q[i][k] * K[j][k];
                 }
 
-                double loss = ComputeLoss(logitsList, targetsList, out List<double[,]> dlogitsList);
-                totalLoss += loss;
+                scores[i][j] = dot / Math.Sqrt (dim);
+            }
+        }
 
-                // Backward pass
-                for (int idx = 0; idx < batch.Count; idx++)
-                {
-                    model.Backward(dlogitsList[idx], caches[idx]);
+        // Apply softmax to scores
+        double[][] attnWeights = new double[seqLen][];
+        for (int i = 0; i < seqLen; i++) {
+            attnWeights[i] = Softmax (scores[i]);
+        }
+
+        // Compute attention output
+        double[][] output = new double[seqLen][];
+        for (int i = 0; i < seqLen; i++) {
+            output[i] = new double[dim];
+            for (int j = 0; j < seqLen; j++) {
+                for (int k = 0; k < dim; k++) {
+                    output[i][k] += attnWeights[i][j] * V[j][k];
                 }
-
-                // Update parameters
-                optimizer.Step(model.GetParameters());
             }
-
-            Console.WriteLine($"Epoch {epoch + 1}/{epochs}, Loss: {totalLoss / numBatches}");
         }
+
+        return output;
     }
 
-    List<List<int[]>> GetBatches(List<int[]> data, int batchSize)
-    {
-        List<List<int[]>> batches = new List<List<int[]>>();
-        for (int i = 0; i < data.Count; i += batchSize)
-            batches.Add(data.Skip(i).Take(batchSize).ToList());
-        return batches;
+    double[] Softmax (double[] x) {
+        double max = double.NegativeInfinity;
+        for (int i = 0; i < x.Length; i++)
+            if (x[i] > max)
+                max = x[i];
+        double sum = 0.0;
+        double[] exp = new double[x.Length];
+        for (int i = 0; i < x.Length; i++) {
+            exp[i] = Math.Exp (x[i] - max);
+            sum += exp[i];
+        }
+
+        for (int i = 0; i < x.Length; i++)
+            exp[i] /= sum;
+        return exp;
     }
 
-    double ComputeLoss(List<double[,]> logitsList, List<int[]> targetsList, out List<double[,]> dlogitsList)
-    {
-        double loss = 0.0;
-        dlogitsList = new List<double[,]>();
+    void UpdateMatrix (double[][] W, double[][] gradW, double lr) {
+        int rows = W.Length;
+        int cols = W[0].Length;
+        for (int i = 0; i < rows; i++)
+        for (int j = 0; j < cols; j++)
+            W[i][j] -= lr * gradW[i][j];
+    }
 
-        for (int idx = 0; idx < logitsList.Count; idx++)
-        {
-            double[,] logits = logitsList[idx];
-            int[] targets = targetsList[idx];
-            int N = logits.GetLength(0);
-            int V = logits.GetLength(1);
-
-            double[,] probs = MatrixOperations.Softmax(logits);
-            double[,] dlogits = new double[N, V];
-
-            for (int t = 0; t < N; t++)
-            {
-                int target = targets[t];
-                double[] prob = new double[V];
-                for (int v = 0; v < V; v++)
-                    prob[v] = probs[t, v];
-
-                loss -= Math.Log(prob[target]);
-
-                for (int v = 0; v < V; v++)
-                {
-                    dlogits[t, v] = prob[v];
-                }
-                dlogits[t, target] -= 1.0;
+    double[][] RandomMatrix (int rows, int cols) {
+        Random rand = new Random ();
+        double[][] matrix = new double[rows][];
+        for (int i = 0; i < rows; i++) {
+            matrix[i] = new double[cols];
+            for (int j = 0; j < cols; j++) {
+                matrix[i][j] = rand.NextDouble () * 0.02 - 0.01;
             }
-
-            dlogitsList.Add(dlogits);
         }
 
-        loss /= logitsList.Count;
-        return loss;
-    }
-}
-
-public static class MatrixOperations
-{
-    public static double[,] MatMul(double[,] A, double[,] B)
-    {
-        int m = A.GetLength(0);
-        int n = A.GetLength(1);
-        int p = B.GetLength(1);
-
-        if (n != B.GetLength(0))
-            throw new Exception("Matrix dimensions are not compatible for multiplication.");
-
-        double[,] C = new double[m, p];
-        for (int i = 0; i < m; i++)
-            for (int j = 0; j < p; j++)
-            {
-                C[i, j] = 0.0;
-                for (int k = 0; k < n; k++)
-                    C[i, j] += A[i, k] * B[k, j];
-            }
-        return C;
-    }
-
-    public static double[,] Transpose(double[,] A)
-    {
-        int m = A.GetLength(0);
-        int n = A.GetLength(1);
-        double[,] At = new double[n, m];
-        for (int i = 0; i < m; i++)
-            for (int j = 0; j < n; j++)
-                At[j, i] = A[i, j];
-        return At;
-    }
-
-    public static double[,] Softmax(double[,] logits)
-    {
-        int m = logits.GetLength(0);
-        int n = logits.GetLength(1);
-        double[,] probs = new double[m, n];
-        for (int i = 0; i < m; i++)
-        {
-            double maxLogit = double.MinValue;
-            for (int j = 0; j < n; j++)
-                if (logits[i, j] > maxLogit)
-                    maxLogit = logits[i, j];
-
-            double sumExp = 0.0;
-            for (int j = 0; j < n; j++)
-            {
-                probs[i, j] = Math.Exp(logits[i, j] - maxLogit);
-                sumExp += probs[i, j];
-            }
-
-            for (int j = 0; j < n; j++)
-                probs[i, j] /= sumExp;
-        }
-        return probs;
-    }
-
-    public static double[,] SoftmaxBackward(double[,] dprobs, double[,] probs)
-    {
-        int m = probs.GetLength(0);
-        int n = probs.GetLength(1);
-        double[,] dlogits = new double[m, n];
-
-        for (int i = 0; i < m; i++)
-        {
-            double sum_dprobs = 0.0;
-            for (int j = 0; j < n; j++)
-                sum_dprobs += dprobs[i, j];
-
-            for (int j = 0; j < n; j++)
-                dlogits[i, j] = probs[i, j] * (dprobs[i, j] - sum_dprobs * probs[i, j]);
-        }
-        return dlogits;
-    }
-
-    public static double[,] AddMat(double[,] A, double[,] B)
-    {
-        int m = A.GetLength(0);
-        int n = A.GetLength(1);
-        double[,] C = new double[m, n];
-        for (int i = 0; i < m; i++)
-            for (int j = 0; j < n; j++)
-                C[i, j] = A[i, j] + B[i, j];
-        return C;
-    }
-}
-
-// Example usage:
-
-public class Program
-{
-    public static void Main()
-    {
-        int vocabSize = 1000;
-        int embeddingDim = 32;
-        int numHeads = 4;
-        int numLayers = 2;
-        int maxSeqLen = 20;
-        int hiddenDim = 64;
-
-        GPT model = new GPT(vocabSize, embeddingDim, numHeads, numLayers, maxSeqLen, hiddenDim);
-
-        // Dummy data
-        List<int[]> data = new List<int[]>();
-        Random rand = new Random();
-
-        // Generate dummy data: list of sequences of token IDs
-        for (int i = 0; i < 100; i++)
-        {
-            int seqLen = rand.Next(5, maxSeqLen);
-            int[] sequence = new int[seqLen];
-            for (int j = 0; j < seqLen; j++)
-                sequence[j] = rand.Next(0, vocabSize);
-            data.Add(sequence);
-        }
-
-        Trainer trainer = new Trainer();
-        trainer.Train(data, model, epochs: 5, batchSize: 16, learningRate: 0.001);
-
-        Console.WriteLine("Training completed.");
+        return matrix;
     }
 }

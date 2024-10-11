@@ -81,25 +81,23 @@ public class GPTModel
         return positions;
     }
 
-    public int PredictNextToken(int[] inputIds)
-    {
-        var logits = Forward(new int[][] { inputIds })[0]; // Forward pass for a single sequence
+    public int PredictNextToken (int[] inputIds) {
+        var logits = Forward (new int[][] { inputIds })[0]; // Forward pass for a single sequence
         int lastPosition = inputIds.Length - 1;
         var lastLogits = new double[VocabSize];
         for (int i = 0; i < VocabSize; i++)
             lastLogits[i] = logits.Data[lastPosition, i];
 
         // Apply softmax to convert logits to probabilities
-        var probabilities = Softmax(lastLogits);
+        var probabilities = Softmax (lastLogits);
 
         // Select the token with the highest probability (greedy decoding)
-        int nextTokenId = ArgMax(probabilities);
+        int nextTokenId = ArgMax (probabilities);
 
         return nextTokenId;
     }
 
-    private double[] Softmax(double[] logits)
-    {
+    private double[] Softmax (double[] logits) {
         double maxLogit = double.NegativeInfinity;
         for (int i = 0; i < logits.Length; i++)
             if (logits[i] > maxLogit)
@@ -107,9 +105,8 @@ public class GPTModel
 
         double sumExp = 0.0;
         var expLogits = new double[logits.Length];
-        for (int i = 0; i < logits.Length; i++)
-        {
-            expLogits[i] = Math.Exp(logits[i] - maxLogit);
+        for (int i = 0; i < logits.Length; i++) {
+            expLogits[i] = Math.Exp (logits[i] - maxLogit);
             sumExp += expLogits[i];
         }
 
@@ -120,55 +117,50 @@ public class GPTModel
         return probabilities;
     }
 
-    private int ArgMax(double[] array)
-    {
+    private int ArgMax (double[] array) {
         int maxIndex = 0;
         double maxValue = array[0];
-        for (int i = 1; i < array.Length; i++)
-        {
-            if (array[i] > maxValue)
-            {
+        for (int i = 1; i < array.Length; i++) {
+            if (array[i] > maxValue) {
                 maxValue = array[i];
                 maxIndex = i;
             }
         }
+
         return maxIndex;
     }
 
-    public int PredictNextToken(int[] inputIds, double temperature = 1.0, int topK = 0)
-    {
-        var logits = Forward(new int[][] { inputIds })[0];
+    public int PredictNextToken (int[] inputIds, double temperature = 1.0, int topK = 0) {
+        var logits = Forward (new int[][] { inputIds })[0];
         int lastPosition = inputIds.Length - 1;
         var lastLogits = new double[VocabSize];
         for (int i = 0; i < VocabSize; i++)
             lastLogits[i] = logits.Data[lastPosition, i] / temperature;
 
-        if (topK > 0)
-        {
-            lastLogits = TopKFilter(lastLogits, topK);
+        if (topK > 0) {
+            lastLogits = TopKFilter (lastLogits, topK);
         }
 
         // Apply softmax to convert logits to probabilities
-        var probabilities = Softmax(lastLogits);
+        var probabilities = Softmax (lastLogits);
 
         // Sample the next token based on probabilities
-        int nextTokenId = SampleFromDistribution(probabilities);
+        int nextTokenId = SampleFromDistribution (probabilities);
 
         return nextTokenId;
     }
 
-    private double[] TopKFilter(double[] logits, int k)
-    {
+    private double[] TopKFilter (double[] logits, int k) {
         var filteredLogits = new double[logits.Length];
-        Array.Copy(logits, filteredLogits, logits.Length);
+        Array.Copy (logits, filteredLogits, logits.Length);
 
         var indices = new int[logits.Length];
         for (int i = 0; i < logits.Length; i++)
             indices[i] = i;
 
-        Array.Sort(logits, indices);
-        Array.Reverse(logits);
-        Array.Reverse(indices);
+        Array.Sort (logits, indices);
+        Array.Reverse (logits);
+        Array.Reverse (indices);
 
         for (int i = k; i < logits.Length; i++)
             filteredLogits[indices[i]] = double.NegativeInfinity;
@@ -176,17 +168,16 @@ public class GPTModel
         return filteredLogits;
     }
 
-    private int SampleFromDistribution(double[] probabilities)
-    {
-        var rand = new Random();
+    private int SampleFromDistribution (double[] probabilities) {
+        var rand = new Random ();
         double cumulative = 0.0;
-        double sample = rand.NextDouble();
-        for (int i = 0; i < probabilities.Length; i++)
-        {
+        double sample = rand.NextDouble ();
+        for (int i = 0; i < probabilities.Length; i++) {
             cumulative += probabilities[i];
             if (sample < cumulative)
                 return i;
         }
+
         return probabilities.Length - 1; // Fallback
     }
 }
@@ -773,23 +764,26 @@ public class Optimizer
 public class MinGPT3Test
 {
     public static void run () {
-        int vocabSize = 256;
-        int embeddingSize = 192;
+        int embeddingSize = 96;
         int numHeads = 6;
-        int numLayers = 6;
-        int maxSeqLen = 16;
-        int batchSize = 8;
+        int numLayers = 4;
+        int maxSeqLen = 8;
+        int batchSize = 1;
+
+        var data = LoadData (maxSeqLen, out var vocabSize, out var vocabulary);
+
+        Console.WriteLine("vocabulary size: " + vocabSize);
 
         var model = new GPTModel (vocabSize, embeddingSize, numHeads, numLayers, maxSeqLen);
         var optimizer = new Optimizer (learningRate: 0.0005);
 
-        var data = LoadData (maxSeqLen);
-
         for (int epoch = 0; epoch < 1000; epoch++) {
-            int[][] batchInputIds = data
-                .Skip (epoch)
-                .Take (batchSize)
+
+            var batchInputIds = Enumerable
+                .Range (0, batchSize)
+                .Select (_ => data ())
                 .ToArray ();
+
             var logitsBatch = model.Forward (batchInputIds);
 
             double loss = ComputeLoss (logitsBatch, batchInputIds, out Matrix[] dLogitsBatch);
@@ -799,66 +793,83 @@ public class MinGPT3Test
 
             Console.WriteLine ($"Epoch {epoch}, Loss: {loss:F4}");
 
-            var test = string.Join ("", Enumerable
+            var tokens =  Enumerable
                 .Range (0, 5)
-                .Select (i => (char)model.PredictNextToken ("hello".Select (_ => (int)_).ToArray (), temperature: 0.7, topK: 40))
-                .ToArray ());
-            Console.Write (test);
+                .Select (i => model.PredictNextToken (encode ("The", vocabulary), temperature: 0.7, topK: 40))
+                .ToArray ();
+            Console.Write (decode (tokens, vocabulary));
         }
+
         // After training, generate text
-        int[] seedInput = GetSeedInput(); // Your initial sequence of tokens
+        int[] seedInput = GetSeedInput (); // Your initial sequence of tokens
         int generatedLength = 20; // Number of tokens to generate
 
-        var generatedTokens = new List<int>(seedInput);
+        var generatedTokens = new List<int> (seedInput);
 
-        for (int i = 0; i < generatedLength; i++)
-        {
-            int[] currentInput = generatedTokens.ToArray();
-            int nextTokenId = model.PredictNextToken(currentInput);
-            generatedTokens.Add(nextTokenId);
+        for (int i = 0; i < generatedLength; i++) {
+            int[] currentInput = generatedTokens.ToArray ();
+            int nextTokenId = model.PredictNextToken (currentInput);
+            generatedTokens.Add (nextTokenId);
         }
 
         // Convert token IDs to actual tokens (depends on your tokenizer)
-        string generatedText = DecodeTokens(generatedTokens.ToArray());
-        Console.WriteLine("Generated Text:");
-        Console.WriteLine(generatedText);
+        string generatedText = DecodeTokens (generatedTokens.ToArray ());
+        Console.WriteLine ("Generated Text:");
+        Console.WriteLine (generatedText);
     }
 
-    static int[] GetSeedInput()
-    {
+    static int[] GetSeedInput () {
         // Provide your own seed input sequence
         // For demonstration, we'll generate a random sequence
-        var rand = new Random();
+        var rand = new Random ();
         int seqLen = 5;
         var inputIds = new int[seqLen];
         for (int i = 0; i < seqLen; i++)
-            inputIds[i] = rand.Next(0, 1000);
+            inputIds[i] = rand.Next (0, 1000);
         return inputIds;
     }
 
-    static string DecodeTokens(int[] tokenIds)
-    {
+    static string DecodeTokens (int[] tokenIds) {
         // Convert token IDs back to text
         // This depends on your tokenizer/vocabulary mapping
         // For demonstration, we'll just return token IDs as strings
-        return string.Join(" ", tokenIds);
+        return string.Join (" ", tokenIds);
     }
 
-    static int[][] LoadData (int sequenceLength) {
+    static int[] encode (string source, char[] vocabulary) {
+        var charToIndex = vocabulary
+            .Select ((c, index) => (c, index))
+            .ToDictionary ();
+        return source.Select (c => charToIndex[c]).ToArray ();
+    }
+
+    static string decode (int[] tokens, char[] vocabulary) {
+        return string.Join ("", tokens.Select (c => c >= vocabulary.Length ? '?' : vocabulary[c]).ToArray ());
+    }
+
+    static Func<int[]> LoadData (int sequenceLength, out int vocabularySize, out char[] vocabulary) {
         var text = File.ReadAllText ("resources/tinyshakespeare.txt");
-        var data = text.Select (_ => (int)_).ToArray ();
+        var sourceCharacters = text.ToArray ();
 
-        int batches = data.Length / sequenceLength;
+        vocabulary = sourceCharacters
+            .Distinct ()
+            .Order()
+            .ToArray ();
+        vocabularySize = vocabulary.Length;
 
-        // Load and preprocess your training data here
-        // Placeholder for data loading
-        // Return an array of sequences (arrays of token IDs)
-        return Enumerable
-            .Range (0, batches)
-            .Select (i => data
-                .Skip (i * sequenceLength)
-                .Take (sequenceLength)
-                .ToArray ())
+        Console.WriteLine($"vocabulary: {string.Join ("",vocabulary)}");
+
+        var charToIndex = vocabulary
+            .Select ((c, index) => (c, index))
+            .ToDictionary ();
+
+        var data = sourceCharacters.Select (c => charToIndex[c]).ToArray ();
+
+        var rnd = new Random ();
+
+        return () => data
+            .Skip (rnd.Next(0, data.Length - sequenceLength))
+            .Take (sequenceLength)
             .ToArray ();
     }
 
