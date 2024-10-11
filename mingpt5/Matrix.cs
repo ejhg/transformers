@@ -15,6 +15,10 @@ public class Matrix
         }
     }
 
+    public Matrix (double[,] data) {
+        throw new NotImplementedException ();
+    }
+
     public static Matrix Multiply (Matrix a, Matrix b) {
         if (a.Cols != b.Rows)
             throw new ArgumentException ("Matrix dimensions are not suitable for multiplication.");

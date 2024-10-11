@@ -26,4 +26,13 @@ public class EmbeddingLayer
         for (int j = 0; j < EmbeddingSize; j++)
             GradWeights.Data[inputIds[i], j] += dOutput.Data[i, j];
     }
+
+    public void UpdateParameters (double learningRate) {
+        for (int i = 0; i < VocabSize; i++) {
+            for (int j = 0; j < EmbeddingSize; j++) {
+                Weights.Data[i, j] -= learningRate * GradWeights.Data[i, j];
+                GradWeights.Data[i, j] = 0; // Reset gradients
+            }
+        }
+    }
 }

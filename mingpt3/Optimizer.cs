@@ -9,13 +9,8 @@ public class Optimizer
     }
 
     public void Step (Model model) {
-        // Update token embeddings
-        model.TokenEmbedding.Weights -= LearningRate * model.TokenEmbedding.GradWeights;
-        model.TokenEmbedding.GradWeights.Clear ();
-
-        // Update positional embeddings
-        model.PositionalEmbedding.Weights -= LearningRate * model.PositionalEmbedding.GradWeights;
-        model.PositionalEmbedding.GradWeights.Clear ();
+        model.TokenEmbedding.UpdateParameters (LearningRate);
+        model.PositionalEmbedding.UpdateParameters (LearningRate);
 
         // Update final linear layer
         model.FinalLayer.Weights -= LearningRate * model.FinalLayer.GradWeights;
