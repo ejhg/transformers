@@ -1,3 +1,5 @@
+using transformers.utils;
+
 namespace mingpt7;
 
 public class Trainer
@@ -39,20 +41,9 @@ public class Trainer
     public int PredictNextToken (int[] tokenIndices) {
         double[][] outputs = model.Forward (tokenIndices);
         double[] probs = model.Predict (outputs[tokenIndices.Length - 1]);
-        int nextToken = SampleFromDistribution (probs);
+        int nextToken = sampling.SampleFromDistribution (probs);
         return nextToken;
     }
 
-    int SampleFromDistribution (double[] probs) {
-        Random rand = new Random ();
-        double r = rand.NextDouble ();
-        double cumulative = 0.0;
-        for (int i = 0; i < probs.Length; i++) {
-            cumulative += probs[i];
-            if (r < cumulative)
-                return i;
-        }
 
-        return probs.Length - 1;
-    }
 }

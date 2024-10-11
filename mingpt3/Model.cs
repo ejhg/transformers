@@ -1,3 +1,5 @@
+using transformers.utils;
+
 namespace mingpt3;
 
 /**
@@ -83,22 +85,6 @@ public class Model
         return positions;
     }
 
-    public int PredictNextToken (int[] inputIds) {
-        var logits = Forward (new int[][] { inputIds })[0]; // Forward pass for a single sequence
-        int lastPosition = inputIds.Length - 1;
-        var lastLogits = new double[VocabSize];
-        for (int i = 0; i < VocabSize; i++)
-            lastLogits[i] = logits.Data[lastPosition, i];
-
-        // Apply softmax to convert logits to probabilities
-        var probabilities = Softmax (lastLogits);
-
-        // Select the token with the highest probability (greedy decoding)
-        int nextTokenId = ArgMax (probabilities);
-
-        return nextTokenId;
-    }
-
     private double[] Softmax (double[] logits) {
         double maxLogit = double.NegativeInfinity;
         for (int i = 0; i < logits.Length; i++)
@@ -119,20 +105,7 @@ public class Model
         return probabilities;
     }
 
-    private int ArgMax (double[] array) {
-        int maxIndex = 0;
-        double maxValue = array[0];
-        for (int i = 1; i < array.Length; i++) {
-            if (array[i] > maxValue) {
-                maxValue = array[i];
-                maxIndex = i;
-            }
-        }
-
-        return maxIndex;
-    }
-
-    public int PredictNextToken (int[] inputIds, double temperature = 1.0, int topK = 0) {
+    public int PredictNextToken (int[] inputIds, double temperature = 1.0, int topK = 0, bool argmax = false) {
         var logits = Forward (new int[][] { inputIds })[0];
         int lastPosition = inputIds.Length - 1;
         var lastLogits = new double[VocabSize];
@@ -147,9 +120,9 @@ public class Model
         var probabilities = Softmax (lastLogits);
 
         // Sample the next token based on probabilities
-        int nextTokenId = SampleFromDistribution (probabilities);
-
-        return nextTokenId;
+        return argmax
+            ? sampling.ArgMax (probabilities)
+            : sampling.SampleFromDistribution (probabilities);
     }
 
     private double[] TopKFilter (double[] logits, int k) {
@@ -168,18 +141,5 @@ public class Model
             filteredLogits[indices[i]] = double.NegativeInfinity;
 
         return filteredLogits;
-    }
-
-    private int SampleFromDistribution (double[] probabilities) {
-        var rand = new Random ();
-        double cumulative = 0.0;
-        double sample = rand.NextDouble ();
-        for (int i = 0; i < probabilities.Length; i++) {
-            cumulative += probabilities[i];
-            if (sample < cumulative)
-                return i;
-        }
-
-        return probabilities.Length - 1; // Fallback
     }
 }
