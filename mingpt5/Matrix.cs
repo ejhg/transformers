@@ -55,18 +55,6 @@ public class Matrix
         return result;
     }
 
-    public static Matrix Multiply (Matrix a, Matrix b) {
-        if (a.Cols != b.Rows)
-            throw new Exception ("Matrix dimensions are not compatible for multiplication");
-
-        Matrix result = new Matrix (a.Rows, b.Cols);
-        for (int i = 0; i < a.Rows; i++)
-        for (int j = 0; j < b.Cols; j++)
-        for (int k = 0; k < a.Cols; k++)
-            result.Data[i][j] += a.Data[i][k] * b.Data[k][j];
-        return result;
-    }
-
     public Matrix Transpose () {
         Matrix result = new Matrix (Cols, Rows);
         for (int i = 0; i < Rows; i++)
@@ -90,16 +78,6 @@ public class Matrix
         }
 
         return result;
-    }
-
-    public void ApplyFunction (Func<double, double> func) {
-        for (int i = 0; i < Rows; i++)
-        for (int j = 0; j < Cols; j++)
-            Data[i][j] = func (Data[i][j]);
-    }
-
-    public Matrix Clone () {
-        return new Matrix (Data);
     }
 
     public static Matrix OuterProduct (Vector a, Vector b) {

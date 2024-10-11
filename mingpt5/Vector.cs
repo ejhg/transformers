@@ -49,12 +49,6 @@ public class Vector
         return result;
     }
 
-    public void ApplyFunction (Func<double, double> func) {
-        for (int i = 0; i < Size; i++) {
-            Data[i] = func (Data[i]);
-        }
-    }
-
     public double Dot (Vector other) {
         if (Size != other.Size)
             throw new Exception ("Vector sizes do not match");

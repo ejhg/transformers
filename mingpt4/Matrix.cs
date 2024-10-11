@@ -14,16 +14,6 @@ class Matrix
             Data[i] = new double[cols];
     }
 
-    public Matrix (double[][] data) {
-        Rows = data.Length;
-        Cols = data[0].Length;
-        Data = new double[Rows][];
-        for (int i = 0; i < Rows; i++) {
-            Data[i] = new double[Cols];
-            Array.Copy (data[i], Data[i], Cols);
-        }
-    }
-
     public static Matrix Multiply (Matrix a, Matrix b) {
         if (a.Cols != b.Rows)
             throw new ArgumentException ("Matrix dimensions are not suitable for multiplication.");
@@ -36,21 +26,6 @@ class Matrix
                     sum += a.Data[i][k] * b.Data[k][j];
                 result.Data[i][j] = sum;
             }
-        }
-
-        return result;
-    }
-
-    public static Vector Multiply (Matrix a, Vector b) {
-        if (a.Cols != b.Size)
-            throw new ArgumentException ("Matrix and vector dimensions are not suitable for multiplication.");
-
-        Vector result = new Vector (a.Rows);
-        for (int i = 0; i < a.Rows; i++) {
-            double sum = 0;
-            for (int j = 0; j < a.Cols; j++)
-                sum += a.Data[i][j] * b.Data[j];
-            result.Data[i] = sum;
         }
 
         return result;
@@ -73,28 +48,5 @@ class Matrix
         for (int j = 0; j < a.Cols; j++)
             result.Data[i][j] = a.Data[i][j] + b.Data[i][j];
         return result;
-    }
-
-    public static Matrix Subtract (Matrix a, Matrix b) {
-        if (a.Rows != b.Rows || a.Cols != b.Cols)
-            throw new ArgumentException ("Matrices must be the same size.");
-
-        Matrix result = new Matrix (a.Rows, a.Cols);
-        for (int i = 0; i < a.Rows; i++)
-        for (int j = 0; j < a.Cols; j++)
-            result.Data[i][j] = a.Data[i][j] - b.Data[i][j];
-        return result;
-    }
-
-    public static Matrix Multiply (Matrix a, double scalar) {
-        Matrix result = new Matrix (a.Rows, a.Cols);
-        for (int i = 0; i < a.Rows; i++)
-        for (int j = 0; j < a.Cols; j++)
-            result.Data[i][j] = a.Data[i][j] * scalar;
-        return result;
-    }
-
-    public Matrix Clone () {
-        return new Matrix (Data);
     }
 }
