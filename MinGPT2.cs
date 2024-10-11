@@ -978,9 +978,9 @@ class Trainer
     }
 }
 
-class Program
+class MinGPT2Trainer
 {
-    static void Main (string[] args) {
+    public static void run () {
         MinGPT2 gpt = new MinGPT2 ();
         int[][] trainingData = LoadData ();
         Trainer trainer = new Trainer (gpt, trainingData, epochs: 10, batchSize: 32, learningRate: 1e-3f);
@@ -988,9 +988,22 @@ class Program
     }
 
     static int[][] LoadData () {
+        var text = File.ReadAllText ("resources/tinyshakespeare.txt");
+        var data = text.Select (_ => (int)_).ToArray ();
+
+        var sequenceLength = 128;
+
+        int batches = data.Length / sequenceLength;
+
         // Load and preprocess your training data here
         // Placeholder for data loading
         // Return an array of sequences (arrays of token IDs)
-        return new int[1][] { new int[128] };
+        return Enumerable
+            .Range (0, batches)
+            .Select (i => data
+                .Skip (i * sequenceLength)
+                .Take (sequenceLength)
+                .ToArray ())
+            .ToArray ();
     }
 }

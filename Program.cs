@@ -1,5 +1,5 @@
-﻿using mingpt;
+﻿using MiniGPT2;
 
 Console.WriteLine("start");
 
-MinGPT1Test.Main ();
+MinGPT2Trainer.run ();
