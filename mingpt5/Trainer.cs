@@ -1,3 +1,5 @@
+using transformers.utils;
+
 namespace mingpt5;
 
 public class Trainer
@@ -19,8 +21,8 @@ public class Trainer
 
             // Forward pass
             Vector logits = Model.Forward (inputSequence);
-            Vector probs = Model.Softmax (logits);
-            double loss = Model.ComputeLoss (probs, targetToken);
+            Vector probs = new Vector (math.Softmax (logits.Data));
+            double loss = math.CrossEntropyLoss (probs.Data, targetToken);
             totalLoss += loss;
             totalTokens++;
 
@@ -39,7 +41,7 @@ public class Trainer
 
     public int PredictNextToken (int[] inputSequence) {
         Vector logits = Model.Forward (inputSequence);
-        Vector probs = Model.Softmax (logits);
+        Vector probs = new Vector (math.Softmax (logits.Data));
 
         // Get the index with the highest probability
         double maxProb = double.MinValue;

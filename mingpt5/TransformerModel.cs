@@ -28,7 +28,10 @@ public class TransformerModel
         }
 
         ClassificationLayer = new Matrix (VocabSize, EmbeddingDim);
-        InitializeMatrix (ClassificationLayer);
+        Random rand = new Random ();
+        for (int i1 = 0; i1 < ClassificationLayer.Rows; i1++)
+        for (int j = 0; j < ClassificationLayer.Cols; j++)
+            ClassificationLayer.Data[i1][j] = (rand.NextDouble () - 0.5) / ClassificationLayer.Cols;
     }
 
     private void InitializeMatrix (Matrix m) {
@@ -92,31 +95,6 @@ public class TransformerModel
         }
 
         return null; // No need to return anything
-    }
-
-    public Vector Softmax (Vector logits) {
-        double maxLogit = double.MinValue;
-        for (int i = 0; i < logits.Size; i++) {
-            if (logits.Data[i] > maxLogit) maxLogit = logits.Data[i];
-        }
-
-        double sumExp = 0.0;
-        Vector probs = new Vector (logits.Size);
-        for (int i = 0; i < logits.Size; i++) {
-            probs.Data[i] = Math.Exp (logits.Data[i] - maxLogit);
-            sumExp += probs.Data[i];
-        }
-
-        for (int i = 0; i < logits.Size; i++) {
-            probs.Data[i] /= sumExp;
-        }
-
-        return probs;
-    }
-
-    public double ComputeLoss (Vector probs, int targetIndex) {
-        double loss = -Math.Log (probs.Data[targetIndex] + 1e-9);
-        return loss;
     }
 
     public Vector ComputeLossGradient (Vector probs, int targetIndex) {

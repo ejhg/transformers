@@ -2,7 +2,7 @@ namespace mingpt3;
 
 public class Optimizer
 {
-    public double LearningRate;
+    double LearningRate;
 
     public Optimizer (double learningRate) {
         LearningRate = learningRate;

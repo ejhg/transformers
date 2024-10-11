@@ -18,8 +18,7 @@ class CrossEntropyLoss
             for (int j = 0; j < vocabSize; j++)
                 sumExp += Math.Exp (logits.Data[i][j] - maxLogit);
 
-            double logProb = logits.Data[i][targets[i]] - maxLogit - Math.Log (sumExp);
-            loss -= logProb;
+            loss -= logits.Data[i][targets[i]] - maxLogit - Math.Log (sumExp);
         }
 
         return loss / seqLength;
