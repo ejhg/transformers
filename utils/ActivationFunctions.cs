@@ -1,4 +1,4 @@
-namespace mingpt6;
+namespace transformers.utils;
 
 public static class ActivationFunctions
 {

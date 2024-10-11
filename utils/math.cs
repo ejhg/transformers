@@ -1,4 +1,4 @@
-namespace mingpt7;
+namespace transformers.utils;
 
 public static class math
 {

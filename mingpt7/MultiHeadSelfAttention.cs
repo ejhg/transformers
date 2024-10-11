@@ -1,3 +1,5 @@
+using transformers.utils;
+
 namespace mingpt7;
 
 public class MultiHeadSelfAttention

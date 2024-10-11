@@ -1,3 +1,5 @@
+using transformers.utils;
+
 namespace mingpt6;
 
 public class MultiHeadSelfAttention
@@ -11,8 +13,6 @@ public class MultiHeadSelfAttention
     private Matrix Wk;
     private Matrix Wv;
     private Matrix Wo;
-
-    private RoPE rope;
 
     public MultiHeadSelfAttention (int numHeads, int hiddenSize, int maxPosition) {
         this.numHeads = numHeads;
@@ -28,8 +28,6 @@ public class MultiHeadSelfAttention
         InitializeMatrix (Wk);
         InitializeMatrix (Wv);
         InitializeMatrix (Wo);
-
-        rope = new RoPE (hiddenSize, maxPosition);
     }
 
     private void InitializeMatrix (Matrix m) {
@@ -52,8 +50,8 @@ public class MultiHeadSelfAttention
             V[t] = MultiplyMatrixVector (Wv, inputs[t]);
 
             // Apply RoPE to Q and K
-            Q[t] = rope.ApplyRoPE (Q[t], t);
-            K[t] = rope.ApplyRoPE (K[t], t);
+            Q[t] = math.ApplyROPE (Q[t], t);
+            K[t] = math.ApplyROPE (K[t], t);
         }
 
         // Split Q, K, V into heads
