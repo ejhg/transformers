@@ -38,21 +38,4 @@ public class Trainer
             Console.WriteLine ($"Epoch {epoch + 1}, Loss: {totalLoss / totalTokens}, Perplexity: {perplexity}");
         }
     }
-
-    public int PredictNextToken (int[] inputSequence) {
-        Vector logits = Model.Forward (inputSequence);
-        Vector probs = new Vector (math.Softmax (logits.Data));
-
-        // Get the index with the highest probability
-        double maxProb = double.MinValue;
-        int predictedToken = -1;
-        for (int i = 0; i < probs.Size; i++) {
-            if (probs.Data[i] > maxProb) {
-                maxProb = probs.Data[i];
-                predictedToken = i;
-            }
-        }
-
-        return predictedToken;
-    }
 }

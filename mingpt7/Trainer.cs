@@ -37,13 +37,4 @@ public class Trainer
             }
         }
     }
-
-    public int PredictNextToken (int[] tokenIndices) {
-        double[][] outputs = model.Forward (tokenIndices);
-        double[] probs = model.Predict (outputs[tokenIndices.Length - 1]);
-        int nextToken = sampling.SampleFromDistribution (probs);
-        return nextToken;
-    }
-
-
 }

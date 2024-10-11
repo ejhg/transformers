@@ -48,8 +48,7 @@ public class MultiHeadSelfAttention
 
         var concat = ConcatenateHeads (HeadOutputs);
         AttentionOutput = concat;
-        var output = concat * Wo;
-        return output;
+        return concat * Wo;
     }
 
     public Matrix Backward (Matrix dOutput) {
@@ -120,7 +119,7 @@ public class MultiHeadSelfAttention
         return concat;
     }
 
-    private Matrix Softmax (Matrix x) {
+    public static Matrix Softmax (Matrix x) {
         var result = new Matrix (x.Rows, x.Cols);
         for (int i = 0; i < x.Rows; i++) {
             double max = double.NegativeInfinity;

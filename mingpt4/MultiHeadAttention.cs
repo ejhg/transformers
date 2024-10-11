@@ -62,7 +62,6 @@ class MultiHeadAttention
     }
 
     public Matrix Forward (Matrix X) {
-        int seqLength = X.Rows;
         Matrix[] heads = new Matrix[NumHeads];
 
         for (int h = 0; h < NumHeads; h++) {
@@ -72,8 +71,24 @@ class MultiHeadAttention
             Matrix V = Matrix.Multiply (X, W_V[h]);
 
             // Compute attention
-            Matrix head = ScaledDotProductAttention.ComputeAttention (Q, K, V);
-            heads[h] = head;
+            Matrix K_T = K.Transpose ();
+            Matrix scores = Matrix.Multiply (Q, K_T);
+
+            double scale = Math.Sqrt (Q.Cols);
+            for (int i = 0; i < scores.Rows; i++)
+            for (int j = 0; j < scores.Cols; j++)
+                scores.Data[i][j] /= scale;
+
+            // Apply masking for autoregressive behavior
+            for (int i = 0; i < scores.Rows; i++)
+            for (int j = i + 1; j < scores.Cols; j++)
+                scores.Data[i][j] = double.NegativeInfinity;
+
+            // Apply softmax to scores
+            var attentionWeights = new Matrix (mingpt3.MultiHeadSelfAttention.Softmax (new mingpt3.Matrix (scores.Data)).Data);
+
+            // Compute weighted sum of values
+            heads[h] = Matrix.Multiply (attentionWeights, V);
         }
 
         // Concatenate heads

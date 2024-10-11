@@ -3,12 +3,10 @@ namespace mingpt6;
 public class TrainingLoop
 {
     private Transformer model;
-    private Optimizer optimizer;
     private int vocabSize;
 
-    public TrainingLoop (Transformer model, Optimizer optimizer, int vocabSize) {
+    public TrainingLoop (Transformer model, int vocabSize) {
         this.model = model;
-        this.optimizer = optimizer;
         this.vocabSize = vocabSize;
     }
 
