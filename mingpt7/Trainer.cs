@@ -19,6 +19,9 @@ public class Trainer
 
             double[][] outputs = model.Forward (tokenIndices);
 
+            model.Backward (tokenIndices, outputs);
+            model.UpdateParameters (learningRate);
+
             if (epoch % 10 == 0) {
                 double totalLoss = 0.0;
                 int T = tokenIndices.Length;
@@ -32,9 +35,6 @@ public class Trainer
                 double perplexity = Math.Exp (avgLoss);
                 Console.WriteLine ($"Epoch {epoch + 1}, Loss: {avgLoss:F4}, Perplexity: {perplexity:F4}");
             }
-
-            model.Backward (tokenIndices, outputs);
-            model.UpdateParameters (learningRate);
         }
     }
 

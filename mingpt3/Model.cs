@@ -28,54 +28,36 @@ public class Model
         FinalLayer = new LinearLayer (embeddingSize, vocabSize);
     }
 
-    public Matrix[] Forward (int[][] batchInputIds) {
-        int batchSize = batchInputIds.Length;
-        Matrix[] x = new Matrix[batchSize];
+    public Matrix Forward (int[] batchInputIds) {
+        var tokenEmb = TokenEmbedding.Forward (batchInputIds);
+        var positions = new int[batchInputIds.Length];
+        for (int i = 0; i < positions.Length; i++)
+            positions[i] = i;
+        var posEmb = PositionalEmbedding.Forward (positions);
 
-        // Token and positional embeddings
-        for (int b = 0; b < batchSize; b++) {
-            var tokenEmb = TokenEmbedding.Forward (batchInputIds[b]);
-            var positions = new int[batchInputIds[b].Length];
-            for (int i = 0; i < positions.Length; i++)
-                positions[i] = i;
-            var posEmb = PositionalEmbedding.Forward (positions);
-            x[b] = tokenEmb + posEmb;
-        }
+        var x = tokenEmb + posEmb;
 
-        // Transformer layers
         foreach (var layer in Layers) {
-            for (int b = 0; b < batchSize; b++)
-                x[b] = layer.Forward (x[b]);
+            x = layer.Forward (x);
         }
 
-        // Final linear layer
-        for (int b = 0; b < batchSize; b++) {
-            x[b] = FinalLayer.Forward (x[b]);
-        }
+        x = FinalLayer.Forward (x);
 
-        return x; // Returns an array of matrices representing logits for each batch item
+        return x; // Returns logits
     }
 
-    public void Backward (Matrix[] dLogits, int[][] batchInputIds) {
-        int batchSize = dLogits.Length;
-        Matrix[] dX = new Matrix[batchSize];
-
+    public void Backward (Matrix dLogits, int[] batchInputIds) {
         // Backward through final linear layer
-        for (int b = 0; b < batchSize; b++)
-            dX[b] = FinalLayer.Backward (dLogits[b]);
+        var dX = FinalLayer.Backward (dLogits);
 
         // Backward through transformer layers
         for (int i = Layers.Length - 1; i >= 0; i--) {
-            for (int b = 0; b < batchSize; b++)
-                dX[b] = Layers[i].Backward (dX[b]);
+            dX = Layers[i].Backward (dX);
         }
 
         // Backward through embeddings
-        for (int b = 0; b < batchSize; b++) {
-            Matrix dPosEmb = dX[b];
-            TokenEmbedding.Backward (dX[b], batchInputIds[b]);
-            PositionalEmbedding.Backward (dPosEmb, GetPositions (batchInputIds[b].Length));
-        }
+        TokenEmbedding.Backward (dX, batchInputIds);
+        PositionalEmbedding.Backward (dX, GetPositions (batchInputIds.Length));
     }
 
     private int[] GetPositions (int length) {
@@ -105,8 +87,8 @@ public class Model
         return probabilities;
     }
 
-    public int PredictNextToken (int[] inputIds, double temperature = 1.0, int topK = 0, bool argmax = false) {
-        var logits = Forward (new int[][] { inputIds })[0];
+    public int PredictNextToken (int[] inputIds, double temperature = 1.0, int topK = 10, bool argmax = false) {
+        var logits = Forward (inputIds);
         int lastPosition = inputIds.Length - 1;
         var lastLogits = new double[VocabSize];
         for (int i = 0; i < VocabSize; i++)

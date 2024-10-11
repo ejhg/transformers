@@ -2,53 +2,49 @@ namespace mingpt5;
 
 public class EmbeddingLayer
 {
-    public int VocabSize;
-    public int EmbeddingDim;
-    public Matrix EmbeddingMatrix;
-    public Dictionary<int, Vector> Gradients;
+    public int vocabSize;
+    public int embeddingDim;
+    public Matrix weights;
+    public Dictionary<int, Vector> gradWeights;
 
     public EmbeddingLayer (int vocabSize, int embeddingDim) {
-        VocabSize = vocabSize;
-        EmbeddingDim = embeddingDim;
-        EmbeddingMatrix = new Matrix (VocabSize, EmbeddingDim);
-        Gradients = new Dictionary<int, Vector> ();
-        InitializeWeights ();
-    }
-
-    private void InitializeWeights () {
+        this.vocabSize = vocabSize;
+        this.embeddingDim = embeddingDim;
+        weights = new Matrix (this.vocabSize, this.embeddingDim);
+        gradWeights = new Dictionary<int, Vector> ();
         Random rand = new Random ();
-        for (int i = 0; i < VocabSize; i++)
-        for (int j = 0; j < EmbeddingDim; j++)
-            EmbeddingMatrix.Data[i][j] = (rand.NextDouble () - 0.5) / EmbeddingDim;
+        for (int i = 0; i < this.vocabSize; i++)
+        for (int j = 0; j < this.embeddingDim; j++)
+            weights.Data[i][j] = (rand.NextDouble () - 0.5) / this.embeddingDim;
     }
 
     public Vector GetEmbedding (int tokenIndex) {
-        Vector embedding = new Vector (EmbeddingDim);
-        for (int i = 0; i < EmbeddingDim; i++) {
-            embedding.Data[i] = EmbeddingMatrix.Data[tokenIndex][i];
+        Vector embedding = new Vector (embeddingDim);
+        for (int i = 0; i < embeddingDim; i++) {
+            embedding.Data[i] = weights.Data[tokenIndex][i];
         }
 
         return embedding;
     }
 
     public void Backward (int tokenIndex, Vector grad) {
-        if (!Gradients.ContainsKey (tokenIndex))
-            Gradients[tokenIndex] = new Vector (EmbeddingDim);
+        if (!gradWeights.ContainsKey (tokenIndex))
+            gradWeights[tokenIndex] = new Vector (embeddingDim);
 
-        for (int i = 0; i < EmbeddingDim; i++) {
-            Gradients[tokenIndex].Data[i] += grad.Data[i];
+        for (int i = 0; i < embeddingDim; i++) {
+            gradWeights[tokenIndex].Data[i] += grad.Data[i];
         }
     }
 
     public void UpdateParameters (double learningRate) {
-        foreach (var kvp in Gradients) {
+        foreach (var kvp in gradWeights) {
             int tokenIndex = kvp.Key;
             Vector grad = kvp.Value;
-            for (int i = 0; i < EmbeddingDim; i++) {
-                EmbeddingMatrix.Data[tokenIndex][i] -= learningRate * grad.Data[i];
+            for (int i = 0; i < embeddingDim; i++) {
+                weights.Data[tokenIndex][i] -= learningRate * grad.Data[i];
             }
         }
 
-        Gradients.Clear ();
+        gradWeights.Clear ();
     }
 }
