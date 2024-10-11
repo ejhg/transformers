@@ -2,7 +2,7 @@ using mingpt5;
 
 namespace mingpt4;
 
-class FeedForwardNetwork
+class FeedForward
 {
     public int EmbeddingDim { get; set; }
     public int HiddenDim { get; set; }
@@ -16,7 +16,7 @@ class FeedForwardNetwork
     public Matrix dW2 { get; set; }
     public Vector db2 { get; set; }
 
-    public FeedForwardNetwork (int embeddingDim, int hiddenDim) {
+    public FeedForward (int embeddingDim, int hiddenDim) {
         EmbeddingDim = embeddingDim;
         HiddenDim = hiddenDim;
 

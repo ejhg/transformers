@@ -1,3 +1,5 @@
+using mingpt3;
+
 namespace transformers.utils;
 
 public static class math
@@ -80,5 +82,29 @@ public static class math
         if (D % 2 == 1)
             x_out[D - 1] = x[D - 1];
         return x_out;
+    }
+
+    public static double[,] Relu (double[,] x) {
+        var rows = x.GetLength (0);
+        var cols = x.GetLength (1);
+        var result = new double[rows, cols];
+
+        for (int i = 0; i < rows; i++)
+        for (int j = 0; j < cols; j++)
+            result[i, j] = Math.Max (0, x[i, j]);
+
+        return result;
+    }
+
+    public static double[,] ReluBackward (double[,] x, Matrix dOutput) {
+        var rows = x.GetLength (0);
+        var cols = x.GetLength (1);
+        var result = new double[rows, cols];
+
+        for (int i = 0; i < rows; i++)
+        for (int j = 0; j < cols; j++)
+            result[i, j] = x[i, j] > 0 ? dOutput.Data[i, j] : 0;
+
+        return result;
     }
 }

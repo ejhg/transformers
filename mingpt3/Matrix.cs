@@ -11,6 +11,12 @@ public class Matrix
         Data = new double[rows, cols];
     }
 
+    public Matrix (double[,] data) {
+        Rows = data.GetLength (0);
+        Cols = data.GetLength (1);
+        this.Data = data;
+    }
+
     public Matrix (double[][] data) {
         throw new NotImplementedException ();
     }

@@ -5,13 +5,13 @@ namespace mingpt4;
 class TransformerEncoder
 {
     public int NumLayers { get; set; }
-    public EncoderLayer[] EncoderLayers { get; set; }
+    public TransformerBlock[] EncoderLayers { get; set; }
 
     public TransformerEncoder (int numLayers, int embeddingDim, int numHeads, int hiddenDim) {
         NumLayers = numLayers;
-        EncoderLayers = new EncoderLayer[numLayers];
+        EncoderLayers = new TransformerBlock[numLayers];
         for (int i = 0; i < numLayers; i++)
-            EncoderLayers[i] = new EncoderLayer (embeddingDim, numHeads, hiddenDim);
+            EncoderLayers[i] = new TransformerBlock (embeddingDim, numHeads, hiddenDim);
     }
 
     public Matrix Forward (Matrix X) {

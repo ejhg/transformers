@@ -2,17 +2,17 @@ using mingpt5;
 
 namespace mingpt4;
 
-class EncoderLayer
+class TransformerBlock
 {
     public MultiHeadAttention MultiHeadAttention { get; set; }
     public LayerNormalization LayerNorm1 { get; set; }
-    public FeedForwardNetwork FeedForward { get; set; }
+    public FeedForward FeedForward { get; set; }
     public LayerNormalization LayerNorm2 { get; set; }
 
-    public EncoderLayer (int embeddingDim, int numHeads, int hiddenDim) {
+    public TransformerBlock (int embeddingDim, int numHeads, int hiddenDim) {
         MultiHeadAttention = new MultiHeadAttention (embeddingDim, numHeads);
         LayerNorm1 = new LayerNormalization (embeddingDim);
-        FeedForward = new FeedForwardNetwork (embeddingDim, hiddenDim);
+        FeedForward = new FeedForward (embeddingDim, hiddenDim);
         LayerNorm2 = new LayerNormalization (embeddingDim);
     }
 
