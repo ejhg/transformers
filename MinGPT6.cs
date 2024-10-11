@@ -519,34 +519,29 @@ public class TrainingLoop
         this.vocabSize = vocabSize;
     }
 
-    public void Train (int[][] dataset, int epochs) {
+    public void Train (Func<(int[], int)> data, int epochs) {
         for (int epoch = 0; epoch < epochs; epoch++) {
             double totalLoss = 0;
             int totalTokens = 0;
-            foreach (var sequence in dataset) {
-                for (int t = 1; t < sequence.Length; t++) {
-                    int[] inputIds = new int[t];
-                    Array.Copy (sequence, 0, inputIds, 0, t);
-                    int targetId = sequence[t];
 
-                    double[] probabilities = model.Forward (inputIds);
+            var (inputIds, targetId) = data ();
 
-                    // Compute loss (negative log-likelihood)
-                    double loss = -Math.Log (probabilities[targetId] + 1e-10);
-                    totalLoss += loss;
-                    totalTokens++;
+            double[] probabilities = model.Forward (inputIds);
 
-                    // Compute gradient w.r.t logits
-                    double[] gradOutput = new double[vocabSize];
-                    gradOutput[targetId] = -1 / (probabilities[targetId] + 1e-10);
+            // Compute loss (negative log-likelihood)
+            double loss = -Math.Log (probabilities[targetId] + 1e-10);
+            totalLoss += loss;
+            totalTokens++;
 
-                    // Backward pass
-                    model.Backward (inputIds, gradOutput);
+            // Compute gradient w.r.t logits
+            double[] gradOutput = new double[vocabSize];
+            gradOutput[targetId] = -1 / (probabilities[targetId] + 1e-10);
 
-                    // Update parameters
-                    // For simplicity, parameter updates are assumed to be handled in model.Backward
-                }
-            }
+            // Backward pass
+            model.Backward (inputIds, gradOutput);
+
+            // Update parameters
+            // For simplicity, parameter updates are assumed to be handled in model.Backward
 
             double perplexity = Math.Exp (totalLoss / totalTokens);
             Console.WriteLine ($"Epoch {epoch + 1}: Perplexity = {perplexity}");
@@ -581,38 +576,20 @@ public class Predictor
     }
 }
 
-public class Program
+public class MinGPT6Test
 {
-    public static void Main (string[] args) {
-        int vocabSize = 1000;
-        int hiddenSize = 128;
+    public static void run () {
+        int hiddenSize = 96;
         int numHeads = 8;
         int maxPosition = 512;
 
+        var data = LoadData (sequenceLength: 8, out var vocabSize, out var dictionary);
+
         Transformer model = new Transformer (vocabSize, hiddenSize, numHeads, maxPosition);
-        Optimizer optimizer = new Optimizer (learningRate: 0.001);
+        Optimizer optimizer = new Optimizer (learningRate: 0.0005);
         TrainingLoop trainer = new TrainingLoop (model, optimizer, vocabSize);
 
-        // Example dataset: list of sequences (token IDs)
-        int[][] dataset = new int[][] {
-            new int[] {
-                1,
-                2,
-                3,
-                4,
-                5
-            },
-            new int[] {
-                6,
-                7,
-                8,
-                9,
-                10
-            },
-            // Add more sequences
-        };
-
-        trainer.Train (dataset, epochs: 10);
+        trainer.Train (data, epochs: 100);
 
         // Prediction
         Predictor predictor = new Predictor (model);
@@ -623,5 +600,35 @@ public class Program
         };
         int nextTokenId = predictor.PredictNextToken (inputIds);
         Console.WriteLine ($"Predicted next token ID: {nextTokenId}");
+    }
+
+    static Func<(int[], int)> LoadData (int sequenceLength, out int vocabularySize, out char[] vocabulary) {
+        var text = File.ReadAllText ("resources/tinyshakespeare.txt");
+        var sourceCharacters = text.ToArray ();
+
+        vocabulary = sourceCharacters
+            .Distinct ()
+            .Order ()
+            .ToArray ();
+        vocabularySize = vocabulary.Length;
+
+        Console.WriteLine ($"vocabulary: {string.Join ("", vocabulary)}");
+
+        var charToIndex = vocabulary
+            .Select ((c, index) => (c, index))
+            .ToDictionary ();
+
+        var data = sourceCharacters.Select (c => charToIndex[c]).ToArray ();
+
+        var rnd = new Random ();
+
+        return () => {
+            var sample = data
+                .Skip (rnd.Next (0, data.Length - sequenceLength - 1))
+                .Take (sequenceLength + 1)
+                .ToArray ();
+
+            return (sample.Take (sequenceLength).ToArray (), sample[^1]);
+        };
     }
 }
