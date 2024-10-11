@@ -2,4 +2,4 @@
 
 Console.WriteLine("start");
 
-MinGPT2Trainer.run ();
+MinGPT3Test.run ();
