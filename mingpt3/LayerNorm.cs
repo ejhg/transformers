@@ -83,7 +83,10 @@ public class LayerNorm
             }
 
             for (int j = 0; j < D; j++) {
-                dx.Data[i, j] = dXHat[j] * stdInv + dVar * 2.0 * (Input.Data[i, j] - mean) / D + dMean / D;
+                dx.Data[i, j] =
+                    dXHat[j] * stdInv +
+                    dVar * 2.0 * (Input.Data[i, j] - mean) / D +
+                    dMean / D;
             }
         }
 

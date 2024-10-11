@@ -9,7 +9,7 @@ public class MinGPT3Test
         int numHeads = 6;
         int numLayers = 4;
         int maxSeqLen = 8;
-        int batchSize = 1;
+        int batchSize = 8;
 
         var data = DataLoader.LoadData (maxSeqLen, out var vocabSize, out var vocabulary);
 
