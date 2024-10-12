@@ -4,23 +4,24 @@ namespace mingpt3;
 
 static class Trainer
 {
-    public static void train (Model model, Optimizer optimizer, int batchSize, Func<(int[], int)> data, char[]vocabulary) {
+    public static void train (Model model, Optimizer optimizer, int batchSize, Func<(int[] tokens, int next)> data, char[]vocabulary) {
         for (int epoch = 0; epoch < 1000; epoch++) {
-            var batchInputIds = Enumerable
+            var documents = Enumerable
                 .Range (0, batchSize)
-                .Select (_ => data ().Item1)
+                .Select (_ => data ())
                 .ToArray ();
 
             var totalLoss = 0.0;
 
-            foreach (var input in batchInputIds) {
-                var logitsBatch = model.Forward (input);
+            foreach (var document in documents) {
+                var logitsBatch = model.Forward (document.tokens);
 
-                var dLogitsBatch = CrossEntropyLoss.ComputeLoss (logitsBatch, input, out var loss);
+                var targets = document.tokens.Skip (1).Concat ([document.next]).ToArray ();
+                var dLogitsBatch = CrossEntropyLoss.ComputeLoss (logitsBatch, targets, out var loss);
 
                 totalLoss += loss / batchSize;
 
-                model.Backward (dLogitsBatch, input);
+                model.Backward (dLogitsBatch, document.tokens);
             }
 
             optimizer.Step (model);
