@@ -30,10 +30,10 @@ public class Model
 
     public Matrix Forward (int[] batchInputIds) {
         var tokenEmb = TokenEmbedding.Forward (batchInputIds);
-        var positions = new int[batchInputIds.Length];
-        for (int i = 0; i < positions.Length; i++)
-            positions[i] = i;
-        var posEmb = PositionalEmbedding.Forward (positions);
+        var posEmb = PositionalEmbedding.Forward (Enumerable
+            .Range (0, batchInputIds.Length)
+            .Select (i => i)
+            .ToArray ());
 
         var x = tokenEmb + posEmb;
 
@@ -89,10 +89,9 @@ public class Model
 
     public int PredictNextToken (int[] inputIds, double temperature = 1.0, int topK = 10, bool argmax = false) {
         var logits = Forward (inputIds);
-        int lastPosition = inputIds.Length - 1;
         var lastLogits = new double[VocabSize];
         for (int i = 0; i < VocabSize; i++)
-            lastLogits[i] = logits.Data[lastPosition, i] / temperature;
+            lastLogits[i] = logits.Data[inputIds.Length - 1, i] / temperature;
 
         if (topK > 0) {
             lastLogits = TopKFilter (lastLogits, topK);

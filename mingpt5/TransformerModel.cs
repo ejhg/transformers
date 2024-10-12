@@ -1,3 +1,5 @@
+using transformers.utils;
+
 namespace mingpt5;
 
 public class TransformerModel
@@ -8,7 +10,6 @@ public class TransformerModel
     public int HiddenDim;
     public int NumLayers;
     public EmbeddingLayer Embedding;
-    public PositionalEncoding PosEncoding;
     public TransformerBlock[] Layers;
     public Matrix ClassificationLayer;
     public Vector[] Embeddings;
@@ -21,7 +22,6 @@ public class TransformerModel
         NumLayers = numLayers;
 
         Embedding = new EmbeddingLayer (VocabSize, EmbeddingDim);
-        PosEncoding = new PositionalEncoding (EmbeddingDim);
         Layers = new TransformerBlock[NumLayers];
         for (int i = 0; i < NumLayers; i++) {
             Layers[i] = new TransformerBlock (EmbeddingDim, NumHeads, HiddenDim);
@@ -46,7 +46,7 @@ public class TransformerModel
         Embeddings = new Vector[seqLength];
         for (int i = 0; i < seqLength; i++) {
             Vector embedding = Embedding.GetEmbedding (inputTokens[i]);
-            embedding = PosEncoding.ApplyRoPE (embedding, i);
+            embedding = new Vector(math.ApplyROPE (embedding.Data, i));
             Embeddings[i] = embedding;
         }
 

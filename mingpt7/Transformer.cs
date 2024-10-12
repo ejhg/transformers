@@ -1,3 +1,4 @@
+using mingpt3;
 using transformers.utils;
 
 namespace mingpt7;
@@ -9,7 +10,7 @@ public class Transformer
     public int numHeads;
     public int numLayers;
     public int hiddenDim;
-    public Embedding embedding;
+    public EmbeddingLayer embedding;
     public TransformerBlock[] layers;
     public double[,] linearWeight;
     public double[] linearBias;
@@ -23,7 +24,7 @@ public class Transformer
         this.numLayers = numLayers;
         this.hiddenDim = hiddenDim;
 
-        embedding = new Embedding (vocabSize, embeddingDim);
+        embedding = new EmbeddingLayer (vocabSize, embeddingDim);
         layers = new TransformerBlock[numLayers];
         for (int i = 0; i < numLayers; i++)
             layers[i] = new TransformerBlock (embeddingDim, numHeads, hiddenDim);
@@ -52,7 +53,10 @@ public class Transformer
     }
 
     public double[][] Forward (int[] tokenIndices) {
-        double[][] x = embedding.Forward (tokenIndices);
+        // TODO double[][] x = embedding.Forward (tokenIndices);
+        embedding.Forward (tokenIndices);
+        double[][] x = null;
+
         for (int i = 0; i < numLayers; i++)
             x = layers[i].Forward (x);
         return x;
@@ -87,7 +91,8 @@ public class Transformer
         for (int i = numLayers - 1; i >= 0; i--)
             grad = layers[i].Backward (grad);
 
-        embedding.Backward (tokenIndices, grad);
+        // todo
+        // embedding.Backward (tokenIndices, grad);
     }
 
     public void UpdateParameters (double learningRate) {

@@ -5,11 +5,11 @@ namespace mingpt3;
 public class MinGPT3Test
 {
     public static void run () {
-        int embeddingSize = 96;
+        int embeddingSize = 128;
         int numHeads = 6;
         int numLayers = 4;
-        int maxSeqLen = 8;
-        int batchSize = 8;
+        int maxSeqLen = 16;
+        int batchSize = 64;
 
         var data = DataLoader.LoadData (maxSeqLen, out var vocabSize, out var vocabulary);
 

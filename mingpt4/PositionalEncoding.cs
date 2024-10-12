@@ -28,13 +28,4 @@ class PositionalEncoding
         double exponent = (double)(2 * (i / 2)) / EmbeddingDim;
         return pos / Math.Pow (10000, exponent);
     }
-
-    public Matrix AddPositionalEncoding (Matrix embeddings) {
-        int seqLength = embeddings.Rows;
-        Matrix result = new Matrix (seqLength, EmbeddingDim);
-        for (int i = 0; i < seqLength; i++)
-        for (int j = 0; j < EmbeddingDim; j++)
-            result.Data[i][j] = embeddings.Data[i][j] + PositionalEncodings.Data[i][j];
-        return result;
-    }
 }

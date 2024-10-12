@@ -34,9 +34,7 @@ static class Trainer
 
     static string predict (Model model, char[] vocabulary, string prompt, int generatedLength, double temperature = 1.0, int topK = 10,
         bool argmax = false) {
-        int[] seedInput = DataLoader.encode (prompt, vocabulary);
-
-        var generatedTokens = new List<int> (seedInput);
+        var generatedTokens = new List<int> (DataLoader.encode (prompt, vocabulary));
 
         for (int i = 0; i < generatedLength - prompt.Length; i++) {
             int nextTokenId = model.PredictNextToken (
