@@ -1,8 +1,4 @@
-using System;
-using System.Collections.Generic;
-using System.Linq;
-
-namespace LlamaForCausalLM
+namespace llama
 {
     // Utility functions for vector and matrix operations
     public static class MathOps
@@ -831,20 +827,16 @@ namespace LlamaForCausalLM
     // Training Code with backward pass and parameter updates
     public class Trainer
     {
-        public void Train(LlamaForCausalLM model, List<int[]> inputSequences, List<int[]> targetSequences, int epochs, double learningRate)
+        public static void train(LlamaForCausalLM model, SGDOptimizer optimizer, Func<(int[], int)> data, int epochs, int epochSize)
         {
-            SGDOptimizer optimizer = new SGDOptimizer(learningRate);
             for (int epoch = 0; epoch < epochs; epoch++)
             {
                 double totalLoss = 0;
-                for (int i = 0; i < inputSequences.Count; i++)
-                {
-                    int[] inputTokens = inputSequences[i];
-                    int[] targetTokens = targetSequences[i];
+                for (int i = 0; i < epochSize; i++) {
+                    var (inputTokens, targetToken) = data ();
 
                     // Forward pass
                     double[] logits = model.Forward(inputTokens);
-                    int targetToken = targetTokens.Last();
 
                     // Compute loss and gradient
                     double[] dLogits;
@@ -857,7 +849,8 @@ namespace LlamaForCausalLM
                     // Update parameters
                     optimizer.Step(model);
                 }
-                Console.WriteLine($"Epoch {epoch + 1}/{epochs}, Loss: {totalLoss / inputSequences.Count}");
+
+                Console.WriteLine($"Epoch {epoch + 1}/{epochs}, Loss: {totalLoss / epochSize}");
             }
         }
     }
