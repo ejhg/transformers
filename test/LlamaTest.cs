@@ -29,9 +29,9 @@ public class LlamaTest
             1000,
             batchSize,
             callback: () => {
-                var a = TextGeneration.predict (_ => model.Forward (_), vocabulary, "The ", maxSeqLen, topK: 10);
-                var b = TextGeneration.predict (_ => model.Forward (_), vocabulary, "The ", maxSeqLen, topK: 0);
-                var c = TextGeneration.predict (_ => model.Forward (_), vocabulary, "The ", maxSeqLen, topK: 0, argmax: true);
+                var a = TextGeneration.predict (_ => model.Forward (_).Last (), vocabulary, "The ", maxSeqLen, topK: 10);
+                var b = TextGeneration.predict (_ => model.Forward (_).Last (), vocabulary, "The ", maxSeqLen, topK: 0);
+                var c = TextGeneration.predict (_ => model.Forward (_).Last (), vocabulary, "The ", maxSeqLen, topK: 0, argmax: true);
 
                 Console.WriteLine (a);
                 Console.WriteLine (b);

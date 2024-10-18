@@ -46,13 +46,10 @@ public static class MathOps
         double[] dScores = new double[n];
 
         for (int i = 0; i < n; i++) {
-            double sum = 0.0;
             for (int j = 0; j < n; j++) {
                 double delta = (i == j) ? 1.0 : 0.0;
-                sum += softmax[j] * (delta - softmax[i]) * dLoss_dSoftmax[j];
+                dScores[i] += softmax[i] * (delta - softmax[j]) * dLoss_dSoftmax[j];
             }
-
-            dScores[i] = sum;
         }
 
         return dScores;
@@ -465,6 +462,7 @@ public class TransformerBlock
             dSaAdded.Add (new double[EmbedSize]);
 
         // Backward through FeedForward and second residual connection
+        List<double[]> dNormedSaAdded = new List<double[]> ();
         for (int i = 0; i < seqLen; i++) {
             // Gradient w.r.t. the output of the feed-forward layer
             double[] dFfAdded = gradOutputs[i];
@@ -474,34 +472,42 @@ public class TransformerBlock
             double[] dSaAdd = new double[EmbedSize];
             for (int j = 0; j < EmbedSize; j++) {
                 dFfOutput[j] = dFfAdded[j];
-                dSaAdd[j] = dFfAdded[j];
+                dSaAdd[j] += dFfAdded[j]; // Accumulate gradient from the residual path
             }
 
             // Backprop through feed-forward layer
-            double[] dNormedSaAdded = FeedForward.Backward (dFfOutput);
-
-            // Backprop through second LayerNorm
-            double[] dSaAddedNorm = Norm2.Backward (dNormedSaAdded);
+            double[] dNormedSaAddedSingle = FeedForward.Backward (dFfOutput);
+            dNormedSaAdded.Add (dNormedSaAddedSingle);
 
             // Accumulate gradients
-            for (int j = 0; j < EmbedSize; j++) {
-                dSaAdd[j] += dSaAddedNorm[j];
-            }
+            for (int j = 0; j < EmbedSize; j++)
+                dSaAdd[j] += dNormedSaAddedSingle[j];
 
             // Store gradient for saAdd
             dSaAdded[i] = dSaAdd;
         }
 
+        // Backward through second LayerNorm
+        List<double[]> dSaAddedNorm = new List<double[]> ();
+        for (int i = 0; i < seqLen; i++) {
+            dSaAddedNorm.Add (Norm2.Backward (dSaAdded[i]));
+        }
+
         // Backward through Self-Attention and first residual connection
-        List<double[]> dNormedInputs = SelfAttention.Backward (dSaAdded);
+        List<double[]> dNormedInputs = SelfAttention.Backward (dSaAddedNorm);
 
         for (int i = 0; i < seqLen; i++) {
+            // Backprop through first residual connection
+            for (int j = 0; j < EmbedSize; j++) {
+                dInputs[i][j] += dSaAddedNorm[i][j];
+            }
+
             // Backprop through first LayerNorm
             double[] dInputNorm = Norm1.Backward (dNormedInputs[i]);
 
             // Accumulate gradients
             for (int j = 0; j < EmbedSize; j++) {
-                dInputs[i][j] += dInputNorm[j] + dSaAdded[i][j];
+                dInputs[i][j] += dInputNorm[j];
             }
         }
 
@@ -548,7 +554,7 @@ public class LlamaForCausalLM
         return matrix;
     }
 
-    public double[] Forward (int[] inputTokens) {
+    public List<double[]> Forward (int[] inputTokens) {
         this.inputTokens = inputTokens;
         embeddings = inputTokens.Select (token => TokenEmbedding.Forward (token)).ToList ();
 
@@ -557,40 +563,52 @@ public class LlamaForCausalLM
             embeddings = block.Forward (embeddings);
         }
 
-        // Apply final layer normalization to the last token's embedding
-        double[] finalEmbedding = FinalLayerNorm.Forward (embeddings.Last ());
+        // Apply final layer normalization to each token's embedding
+        List<double[]> finalEmbeddings = embeddings.Select (e => FinalLayerNorm.Forward (e)).ToList ();
 
-        // Compute logits
-        double[] logits = new double[VocabSize];
-        for (int i = 0; i < VocabSize; i++)
-            logits[i] = MathOps.Dot (OutputProjection.GetRow (i), finalEmbedding);
-        return logits;
-    }
-
-    public void Backward (double[] dLogits) {
-        // Backward through OutputProjection
-        double[] finalEmbedding = FinalLayerNorm.Forward (embeddings.Last ());
-
-        for (int i = 0; i < VocabSize; i++)
-        for (int j = 0; j < EmbedSize; j++) {
-            dOutputProjection[i, j] += dLogits[i] * finalEmbedding[j];
+        // Compute logits for each time step
+        List<double[]> logitsList = new List<double[]> ();
+        foreach (var finalEmbedding in finalEmbeddings) {
+            double[] logits = new double[VocabSize];
+            for (int i = 0; i < VocabSize; i++)
+                logits[i] = MathOps.Dot (OutputProjection.GetRow (i), finalEmbedding);
+            logitsList.Add (logits);
         }
 
-        double[] dFinalEmbedding = new double[EmbedSize];
-        for (int j = 0; j < EmbedSize; j++)
-        for (int i = 0; i < VocabSize; i++)
-            dFinalEmbedding[j] += OutputProjection[i, j] * dLogits[i];
+        return logitsList;
+    }
 
-        // Backward through FinalLayerNorm
-        double[] dEmbedding = FinalLayerNorm.Backward (dFinalEmbedding);
-
+    public void Backward (List<double[]> dLogitsList) {
         // Initialize gradients for embeddings
         List<double[]> dEmbeddings = new List<double[]> ();
         for (int i = 0; i < embeddings.Count; i++)
             dEmbeddings.Add (new double[EmbedSize]);
 
-        // Set gradient for the last token's embedding
-        dEmbeddings[dEmbeddings.Count - 1] = dEmbedding;
+        // Backward through OutputProjection for each time step
+        for (int t = 0; t < embeddings.Count; t++) {
+            double[] finalEmbedding = FinalLayerNorm.Forward (embeddings[t]);
+
+            // Gradients w.r.t. OutputProjection
+            for (int i = 0; i < VocabSize; i++) {
+                for (int j = 0; j < EmbedSize; j++) {
+                    dOutputProjection[i, j] += dLogitsList[t][i] * finalEmbedding[j];
+                }
+            }
+
+            // Gradients w.r.t. final embeddings
+            double[] dFinalEmbedding = new double[EmbedSize];
+            for (int j = 0; j < EmbedSize; j++) {
+                for (int i = 0; i < VocabSize; i++)
+                    dFinalEmbedding[j] += OutputProjection[i, j] * dLogitsList[t][i];
+            }
+
+            // Backward through FinalLayerNorm
+            double[] dEmbedding = FinalLayerNorm.Backward (dFinalEmbedding);
+
+            // Accumulate gradients
+            for (int j = 0; j < EmbedSize; j++)
+                dEmbeddings[t][j] += dEmbedding[j];
+        }
 
         // Backward through TransformerBlocks
         for (int i = TransformerBlocks.Count - 1; i >= 0; i--) {
@@ -734,22 +752,29 @@ public class SGDOptimizer
 // Training Code with backward pass and parameter updates
 public class Trainer
 {
-    public static void train (LlamaForCausalLM model, SGDOptimizer optimizer, Func<(int[], int)> data, int epochs, int epochSize, Action callback) {
+    public static void train (LlamaForCausalLM model, SGDOptimizer optimizer, Func<(int[], int[])> data, int epochs, int epochSize, Action callback) {
         for (int epoch = 0; epoch < epochs; epoch++) {
             double totalLoss = 0;
             for (int i = 0; i < epochSize; i++) {
-                var (inputTokens, targetToken) = data ();
+                var (inputTokens, targetTokens) = data ();
 
                 // Forward pass
-                double[] logits = model.Forward (inputTokens);
+                List<double[]> logitsList = model.Forward (inputTokens);
 
-                // Compute loss and gradient
-                double[] dLogits;
-                double loss = LossFunctions.CrossEntropyLoss (logits, targetToken, out dLogits);
-                totalLoss += loss;
+                // Compute loss and gradient for each time step
+                List<double[]> dLogitsList = new List<double[]> ();
+                double loss = 0.0;
+
+                for (int t = 0; t < targetTokens.Length; t++) {
+                    double[] dLogits;
+                    loss += LossFunctions.CrossEntropyLoss (logitsList[t], targetTokens[t], out dLogits);
+                    dLogitsList.Add (dLogits);
+                }
+
+                totalLoss += loss / targetTokens.Length;
 
                 // Backward pass
-                model.Backward (dLogits);
+                model.Backward (dLogitsList);
 
                 // Update parameters
                 optimizer.Step (model);

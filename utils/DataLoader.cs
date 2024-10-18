@@ -2,7 +2,7 @@ namespace transformers.utils;
 
 static class DataLoader
 {
-    public static Func<(int[], int)> LoadData (int sequenceLength, out int vocabularySize, out char[] vocabulary) {
+    public static Func<(int[], int[])> LoadData (int sequenceLength, out int vocabularySize, out char[] vocabulary) {
         var text = File.ReadAllText ("resources/tinyshakespeare.txt");
         var sourceCharacters = text.ToArray ();
 
@@ -25,7 +25,7 @@ static class DataLoader
                 .Take (sequenceLength + 1)
                 .ToArray ();
 
-            return (sample.Take (sequenceLength).ToArray (), sample[^1]);
+            return (sample.Take (sequenceLength).ToArray (), sample.Skip (1).Take (sequenceLength).ToArray ());
         };
     }
 

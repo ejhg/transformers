@@ -4,7 +4,7 @@ namespace mingpt3;
 
 static class Trainer
 {
-    public static void train (Model model, Optimizer optimizer, int batchSize, Func<(int[] tokens, int next)> data, char[] vocabulary) {
+    public static void train (Model model, Optimizer optimizer, int batchSize, Func<(int[] tokens, int[] targets)> data, char[] vocabulary) {
         for (int epoch = 0; epoch < 1000; epoch++) {
             var documents = Enumerable
                 .Range (0, batchSize)
@@ -16,8 +16,7 @@ static class Trainer
             foreach (var document in documents) {
                 var logitsBatch = model.Forward (document.tokens);
 
-                var targets = document.tokens.Skip (1).Concat ([document.next]).ToArray ();
-                var dLogitsBatch = CrossEntropyLoss.ComputeLoss (logitsBatch, targets, out var loss);
+                var dLogitsBatch = CrossEntropyLoss.ComputeLoss (logitsBatch, document.targets, out var loss);
 
                 totalLoss += loss / batchSize;
 
