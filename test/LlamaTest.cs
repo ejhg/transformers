@@ -20,7 +20,7 @@ public class LlamaTest
             hiddenSize / numHeads,
             numLayers: 4,
             new Random ());
-        var optimizer = new SGDOptimizer (learningRate: 0.0005);
+        var optimizer = new AdamOptimizer (learningRate: 0.001);
 
         Trainer.train (
             model,
