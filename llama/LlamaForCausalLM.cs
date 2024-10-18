@@ -76,9 +76,10 @@ public class Embedding
         mWeights = new double[vocabSize, embedSize];
         vWeights = new double[vocabSize, embedSize];
 
+        double limit = Math.Sqrt (6.0 / (vocabSize + embedSize)); // Xavier Initialization
         for (int i = 0; i < vocabSize; i++)
         for (int j = 0; j < embedSize; j++)
-            Weights[i, j] = rand.NextDouble () * 0.02 - 0.01;
+            Weights[i, j] = rand.NextDouble () * 2 * limit - limit;
     }
 
     public double[] Forward (int token) {
@@ -172,7 +173,7 @@ public class LayerNormCache
     public double[] normalized;
 }
 
-// Self-Attention mechanism with backward pass
+// Self-Attention mechanism with RoPE and backward pass
 public class SelfAttention
 {
     public double[,] Wq, Wk, Wv, Wo;
@@ -215,13 +216,14 @@ public class SelfAttention
 
     private double[,] InitializeMatrix (int rows, int cols) {
         double[,] matrix = new double[rows, cols];
+        double limit = Math.Sqrt (6.0 / (rows + cols)); // Xavier Initialization
         for (int i = 0; i < rows; i++)
         for (int j = 0; j < cols; j++)
-            matrix[i, j] = rand.NextDouble () * 0.02 - 0.01;
+            matrix[i, j] = rand.NextDouble () * 2 * limit - limit;
         return matrix;
     }
 
-    public (List<double[]> outputs, SelfAttentionCache cache) Forward (List<double[]> inputs) {
+    public (List<double[]> outputs, SelfAttentionCache cache) Forward (List<double[]> inputs, int startPosition) {
         int seqLen = inputs.Count;
 
         var cache = new SelfAttentionCache {
@@ -230,14 +232,24 @@ public class SelfAttention
             Ks = new List<double[]> (),
             Vs = new List<double[]> (),
             Zs = new List<double[]> (),
-            Softmaxes = new List<double[]> ()
+            Softmaxes = new List<double[]> (),
+            StartPosition = startPosition
         };
 
         // Compute Qs, Ks, Vs
-        foreach (var x in inputs) {
-            cache.Qs.Add (MathOps.MatrixVectorProduct (Wq, x));
-            cache.Ks.Add (MathOps.MatrixVectorProduct (Wk, x));
-            cache.Vs.Add (MathOps.MatrixVectorProduct (Wv, x));
+        for (int i = 0; i < seqLen; i++) {
+            var x = inputs[i];
+            var q = MathOps.MatrixVectorProduct (Wq, x);
+            var k = MathOps.MatrixVectorProduct (Wk, x);
+            var v = MathOps.MatrixVectorProduct (Wv, x);
+
+            // Apply RoPE embeddings to q and k
+            q = ApplyRoPE (q, i + startPosition);
+            k = ApplyRoPE (k, i + startPosition);
+
+            cache.Qs.Add (q);
+            cache.Ks.Add (k);
+            cache.Vs.Add (v);
         }
 
         // Compute attention outputs
@@ -319,6 +331,14 @@ public class SelfAttention
             }
         }
 
+        // Backpropagate through RoPE embeddings
+        for (int i = 0; i < seqLen; i++) {
+            int position = i + cache.StartPosition;
+
+            dQs[i] = BackwardRoPE (dQs[i], cache.Qs[i], position);
+            dKs[i] = BackwardRoPE (dKs[i], cache.Ks[i], position);
+        }
+
         // Backpropagate through linear layers Wq, Wk, Wv
         for (int i = 0; i < seqLen; i++) {
             // Gradients w.r.t. Wq and input x_i
@@ -348,6 +368,43 @@ public class SelfAttention
 
         return dInputs;
     }
+
+    private double[] ApplyRoPE (double[] x, int position) {
+        double[] result = new double[x.Length];
+        int halfDim = x.Length / 2;
+        double theta = 10000;
+
+        for (int i = 0; i < halfDim; i++) {
+            double angle = position / Math.Pow (theta, (double)i / halfDim);
+            double cos = Math.Cos (angle);
+            double sin = Math.Sin (angle);
+
+            result[2 * i] = x[2 * i] * cos - x[2 * i + 1] * sin;
+            result[2 * i + 1] = x[2 * i] * sin + x[2 * i + 1] * cos;
+        }
+
+        return result;
+    }
+
+    private double[] BackwardRoPE (double[] grad, double[] x, int position) {
+        double[] dx = new double[x.Length];
+        int halfDim = x.Length / 2;
+        double theta = 10000;
+
+        for (int i = 0; i < halfDim; i++) {
+            double angle = position / Math.Pow (theta, (double)i / halfDim);
+            double cos = Math.Cos (angle);
+            double sin = Math.Sin (angle);
+
+            double dReal = grad[2 * i];
+            double dImag = grad[2 * i + 1];
+
+            dx[2 * i] = dReal * cos + dImag * sin;
+            dx[2 * i + 1] = -dReal * sin + dImag * cos;
+        }
+
+        return dx;
+    }
 }
 
 public class SelfAttentionCache
@@ -358,6 +415,7 @@ public class SelfAttentionCache
     public List<double[]> Vs;
     public List<double[]> Zs;
     public List<double[]> Softmaxes;
+    public int StartPosition;
 }
 
 // Feed-Forward Network with backward pass
@@ -404,9 +462,10 @@ public class FeedForward
 
     private double[,] InitializeMatrix (int rows, int cols) {
         double[,] matrix = new double[rows, cols];
+        double limit = Math.Sqrt (6.0 / (rows + cols)); // Xavier Initialization
         for (int i = 0; i < rows; i++)
         for (int j = 0; j < cols; j++)
-            matrix[i, j] = rand.NextDouble () * 0.02 - 0.01;
+            matrix[i, j] = rand.NextDouble () * 2 * limit - limit;
         return matrix;
     }
 
@@ -495,7 +554,7 @@ public class TransformerBlock
         FeedForward = new FeedForward (embedSize, hiddenSize, random);
     }
 
-    public (List<double[]> outputs, TransformerBlockCache cache) Forward (List<double[]> inputs) {
+    public (List<double[]> outputs, TransformerBlockCache cache) Forward (List<double[]> inputs, int startPosition) {
         int seqLen = inputs.Count;
 
         var cache = new TransformerBlockCache {
@@ -519,7 +578,7 @@ public class TransformerBlock
             cache.norm1Caches.Add (norm1Cache);
         }
 
-        (cache.saOutputs, cache.saCache) = SelfAttention.Forward (cache.normedInputs);
+        (cache.saOutputs, cache.saCache) = SelfAttention.Forward (cache.normedInputs, startPosition);
 
         // Add & Norm
         for (int i = 0; i < seqLen; i++) {
@@ -664,9 +723,10 @@ public class LlamaForCausalLM
 
     private double[,] InitializeMatrix (int rows, int cols) {
         double[,] matrix = new double[rows, cols];
+        double limit = Math.Sqrt (6.0 / (rows + cols)); // Xavier Initialization
         for (int i = 0; i < rows; i++)
         for (int j = 0; j < cols; j++)
-            matrix[i, j] = rand.NextDouble () * 0.02 - 0.01;
+            matrix[i, j] = rand.NextDouble () * 2 * limit - limit;
         return matrix;
     }
 
@@ -676,8 +736,9 @@ public class LlamaForCausalLM
 
         // Process through transformer blocks
         transformerCaches = new List<TransformerBlockCache> ();
+        int startPosition = 0;
         foreach (var block in TransformerBlocks) {
-            (embeddings, var cache) = block.Forward (embeddings);
+            (embeddings, var cache) = block.Forward (embeddings, startPosition);
             transformerCaches.Add (cache);
         }
 
@@ -773,7 +834,7 @@ public static class LossFunctions
     }
 }
 
-// Adam Optimizer
+// Adam Optimizer with gradient clipping
 public class AdamOptimizer
 {
     public double LearningRate;
@@ -781,13 +842,15 @@ public class AdamOptimizer
     public double Beta2;
     public double Epsilon;
     private int timestep;
+    public double GradientClipValue; // Added for gradient clipping
 
-    public AdamOptimizer (double learningRate, double beta1 = 0.9, double beta2 = 0.999, double epsilon = 1e-8) {
+    public AdamOptimizer (double learningRate, double beta1 = 0.9, double beta2 = 0.999, double epsilon = 1e-8, double gradientClipValue = 1.0) {
         LearningRate = learningRate;
         Beta1 = beta1;
         Beta2 = beta2;
         Epsilon = epsilon;
         timestep = 0;
+        GradientClipValue = gradientClipValue;
     }
 
     public void Step (LlamaForCausalLM model) {
@@ -834,13 +897,20 @@ public class AdamOptimizer
     }
 
     private void UpdateLayerNorm (LayerNorm layerNorm) {
+        double biasCorrection1 = 1 - Math.Pow (Beta1, timestep);
+        double biasCorrection2 = 1 - Math.Pow (Beta2, timestep);
+
         for (int i = 0; i < layerNorm.Size; i++) {
+            // Gradient Clipping
+            layerNorm.dGamma[i] = Math.Min (Math.Max (layerNorm.dGamma[i], -GradientClipValue), GradientClipValue);
+            layerNorm.dBeta[i] = Math.Min (Math.Max (layerNorm.dBeta[i], -GradientClipValue), GradientClipValue);
+
             // Update Gamma
             layerNorm.mGamma[i] = Beta1 * layerNorm.mGamma[i] + (1 - Beta1) * layerNorm.dGamma[i];
             layerNorm.vGamma[i] = Beta2 * layerNorm.vGamma[i] + (1 - Beta2) * layerNorm.dGamma[i] * layerNorm.dGamma[i];
 
-            double mHatGamma = layerNorm.mGamma[i] / (1 - Math.Pow (Beta1, timestep));
-            double vHatGamma = layerNorm.vGamma[i] / (1 - Math.Pow (Beta2, timestep));
+            double mHatGamma = layerNorm.mGamma[i] / biasCorrection1;
+            double vHatGamma = layerNorm.vGamma[i] / biasCorrection2;
 
             layerNorm.Gamma[i] -= LearningRate * mHatGamma / (Math.Sqrt (vHatGamma) + Epsilon);
 
@@ -848,8 +918,8 @@ public class AdamOptimizer
             layerNorm.mBeta[i] = Beta1 * layerNorm.mBeta[i] + (1 - Beta1) * layerNorm.dBeta[i];
             layerNorm.vBeta[i] = Beta2 * layerNorm.vBeta[i] + (1 - Beta2) * layerNorm.dBeta[i] * layerNorm.dBeta[i];
 
-            double mHatBeta = layerNorm.mBeta[i] / (1 - Math.Pow (Beta1, timestep));
-            double vHatBeta = layerNorm.vBeta[i] / (1 - Math.Pow (Beta2, timestep));
+            double mHatBeta = layerNorm.mBeta[i] / biasCorrection1;
+            double vHatBeta = layerNorm.vBeta[i] / biasCorrection2;
 
             layerNorm.Beta[i] -= LearningRate * mHatBeta / (Math.Sqrt (vHatBeta) + Epsilon);
 
@@ -874,13 +944,18 @@ public class AdamOptimizer
     private void UpdateParameters (double[,] weights, double[,] gradients, double[,] m, double[,] v) {
         int rows = weights.GetLength (0);
         int cols = weights.GetLength (1);
+        double biasCorrection1 = 1 - Math.Pow (Beta1, timestep);
+        double biasCorrection2 = 1 - Math.Pow (Beta2, timestep);
         for (int i = 0; i < rows; i++)
         for (int j = 0; j < cols; j++) {
+            // Gradient Clipping
+            gradients[i, j] = Math.Min (Math.Max (gradients[i, j], -GradientClipValue), GradientClipValue);
+
             m[i, j] = Beta1 * m[i, j] + (1 - Beta1) * gradients[i, j];
             v[i, j] = Beta2 * v[i, j] + (1 - Beta2) * gradients[i, j] * gradients[i, j];
 
-            double mHat = m[i, j] / (1 - Math.Pow (Beta1, timestep));
-            double vHat = v[i, j] / (1 - Math.Pow (Beta2, timestep));
+            double mHat = m[i, j] / biasCorrection1;
+            double vHat = v[i, j] / biasCorrection2;
 
             weights[i, j] -= LearningRate * mHat / (Math.Sqrt (vHat) + Epsilon);
         }
@@ -888,12 +963,17 @@ public class AdamOptimizer
 
     private void UpdateParameters (double[] weights, double[] gradients, double[] m, double[] v) {
         int length = weights.Length;
+        double biasCorrection1 = 1 - Math.Pow (Beta1, timestep);
+        double biasCorrection2 = 1 - Math.Pow (Beta2, timestep);
         for (int i = 0; i < length; i++) {
+            // Gradient Clipping
+            gradients[i] = Math.Min (Math.Max (gradients[i], -GradientClipValue), GradientClipValue);
+
             m[i] = Beta1 * m[i] + (1 - Beta1) * gradients[i];
             v[i] = Beta2 * v[i] + (1 - Beta2) * gradients[i] * gradients[i];
 
-            double mHat = m[i] / (1 - Math.Pow (Beta1, timestep));
-            double vHat = v[i] / (1 - Math.Pow (Beta2, timestep));
+            double mHat = m[i] / biasCorrection1;
+            double vHat = v[i] / biasCorrection2;
 
             weights[i] -= LearningRate * mHat / (Math.Sqrt (vHat) + Epsilon);
         }
@@ -916,7 +996,8 @@ public class AdamOptimizer
 // Training Code with backward pass and parameter updates
 public class Trainer
 {
-    public static void train (LlamaForCausalLM model, AdamOptimizer optimizer, Func<(int[], int[])> data, int epochs, int epochSize, Action callback) {
+    public static void train (LlamaForCausalLM model, AdamOptimizer optimizer, Func<(int[], int[])> data, int epochs, int epochSize,
+        Action callback) {
         for (int epoch = 0; epoch < epochs; epoch++) {
             double totalLoss = 0;
             for (int i = 0; i < epochSize; i++) {

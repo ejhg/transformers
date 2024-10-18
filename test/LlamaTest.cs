@@ -8,7 +8,7 @@ public class LlamaTest
         int embeddingSize = 128;
         var hiddenSize = 4 * embeddingSize;
         int numHeads = 6;
-        int maxSeqLen = 16;
+        int maxSeqLen = 32;
         int batchSize = 64;
 
         var data = DataLoader.LoadData (maxSeqLen, out var vocabSize, out var vocabulary);
