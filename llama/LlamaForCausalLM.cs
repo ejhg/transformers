@@ -1,3 +1,7 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
+
 namespace llama;
 
 // Utility functions for vector and matrix operations
@@ -72,6 +76,22 @@ public static class MathOps
         double[] expLogits = logits.Select (x => Math.Exp (x - maxLogit)).ToArray ();
         double sumExp = expLogits.Sum ();
         return expLogits.Select (x => x / sumExp).ToArray ();
+    }
+
+    public static double[] SoftmaxGradient (double[] softmax, double[] dAlpha) {
+        int n = softmax.Length;
+        double[] dScores = new double[n];
+        for (int i = 0; i < n; i++) {
+            double sum = 0;
+            for (int j = 0; j < n; j++) {
+                double delta = i == j ? 1.0 : 0.0;
+                sum += (delta - softmax[i]) * softmax[j] * dAlpha[j];
+            }
+
+            dScores[i] += sum;
+        }
+
+        return dScores;
     }
 }
 
@@ -167,8 +187,7 @@ public class SelfAttention
 
     private List<double[]> Qs, Ks, Vs, Zs;
     private List<double[]> Inputs;
-    private double[][] Softmaxes;
-    private double[][] AttentionWeights;
+    private List<double[]> Softmaxes;
 
     public SelfAttention (int embedSize, int headSize) {
         EmbedSize = embedSize;
@@ -200,8 +219,7 @@ public class SelfAttention
         Ks = new List<double[]> ();
         Vs = new List<double[]> ();
         Zs = new List<double[]> ();
-        Softmaxes = new double[seqLen][];
-        AttentionWeights = new double[seqLen][];
+        Softmaxes = new List<double[]> ();
 
         // Compute Qs, Ks, Vs
         foreach (var x in inputs) {
@@ -219,7 +237,7 @@ public class SelfAttention
 
             // Apply softmax to get attention weights
             double[] softmax = MathOps.Softmax (scores);
-            Softmaxes[i] = softmax;
+            Softmaxes.Add (softmax);
 
             // Compute weighted sum of Vs
             double[] z = new double[HeadSize];
@@ -243,7 +261,7 @@ public class SelfAttention
         int seqLen = Inputs.Count;
         List<double[]> dInputs = new List<double[]> ();
         for (int i = 0; i < seqLen; i++)
-            dInputs[i] = new double[EmbedSize];
+            dInputs.Add (new double[EmbedSize]);
 
         // Initialize gradients for Qs, Ks, Vs
         double[][] dQs = new double[seqLen][];
@@ -272,19 +290,13 @@ public class SelfAttention
                 // dAlpha_{ij} = V_j^T * dZ_i
                 dAlpha[j] = MathOps.Dot (Vs[j], dZ);
 
-                // dV_j += alpha_{ij} * dZ_i
+                // dV_j += softmax_{ij} * dZ_i
                 for (int k = 0; k < HeadSize; k++)
                     dVs[j][k] += dZ[k] * Softmaxes[i][j];
             }
 
             // Compute gradients w.r.t. scores s_{ij}
-            double[] dScores = new double[i + 1];
-            for (int j = 0; j <= i; j++) {
-                for (int l = 0; l <= i; l++) {
-                    double delta = j == l ? 1.0 : 0.0;
-                    dScores[j] += Softmaxes[i][l] * (delta - Softmaxes[i][j]) * dAlpha[l];
-                }
-            }
+            double[] dScores = MathOps.SoftmaxGradient (Softmaxes[i], dAlpha);
 
             // Compute gradients w.r.t. Q_i and K_j
             double scale = 1.0 / Math.Sqrt (HeadSize);
@@ -452,13 +464,27 @@ public class TransformerBlock
         ffOutputs = new List<double[]> ();
         ffAdded = new List<double[]> ();
 
-        normedInputs = inputs.Select (x => Norm1.Forward (x)).ToList ();
+        // Apply first LayerNorm and Self-Attention
+        foreach (var x in inputs) {
+            var normedInput = Norm1.Forward (x);
+            normedInputs.Add (normedInput);
+        }
+
         saOutputs = SelfAttention.Forward (normedInputs);
+
+        // Add & Norm
         for (int i = 0; i < seqLen; i++) {
-            saAdded.Add (MathOps.Add (inputs[i], saOutputs[i]));
-            normedSaAdded.Add (Norm2.Forward (saAdded[i]));
-            ffOutputs.Add (FeedForward.Forward (normedSaAdded[i]));
-            ffAdded.Add (MathOps.Add (saAdded[i], ffOutputs[i]));
+            var saAdd = MathOps.Add (inputs[i], saOutputs[i]);
+            saAdded.Add (saAdd);
+
+            var normedSaAdd = Norm2.Forward (saAdd);
+            normedSaAdded.Add (normedSaAdd);
+
+            var ffOutput = FeedForward.Forward (normedSaAdd);
+            ffOutputs.Add (ffOutput);
+
+            var ffAdd = MathOps.Add (saAdd, ffOutput);
+            ffAdded.Add (ffAdd);
         }
 
         return ffAdded;
@@ -467,27 +493,25 @@ public class TransformerBlock
     public List<double[]> Backward (List<double[]> gradOutputs) {
         int seqLen = gradOutputs.Count;
         List<double[]> dInputs = new List<double[]> ();
-
-        // Initialize gradients
         for (int i = 0; i < seqLen; i++)
             dInputs.Add (new double[EmbedSize]);
 
-        // Gradients after feed-forward layer
-        List<double[]> dFeedForward = new List<double[]> (new double[seqLen][]);
+        List<double[]> dSaOutputs = new List<double[]> ();
         for (int i = 0; i < seqLen; i++)
-            dFeedForward.Add (new double[EmbedSize]);
+            dSaOutputs.Add (new double[EmbedSize]);
 
-        // Backward through residual connection and feed-forward layer
+        // Backward through FeedForward and second residual connection
+        List<double[]> dSaAdded = new List<double[]> ();
         for (int i = 0; i < seqLen; i++) {
             // Gradients w.r.t. the output of the feed-forward layer
             double[] dFfAdded = gradOutputs[i];
 
             // Backprop through residual connection
             double[] dFfOutput = new double[EmbedSize];
-            double[] dSaAdded = new double[EmbedSize];
+            double[] dSaAdd = new double[EmbedSize];
             for (int j = 0; j < EmbedSize; j++) {
                 dFfOutput[j] = dFfAdded[j];
-                dSaAdded[j] = dFfAdded[j];
+                dSaAdd[j] = dFfAdded[j];
             }
 
             // Backprop through feed-forward layer
@@ -498,17 +522,21 @@ public class TransformerBlock
 
             // Sum gradients from residual connection
             for (int j = 0; j < EmbedSize; j++)
-                dSaAdded[j] += dSaAddedNorm[j];
+                dSaAdd[j] += dSaAddedNorm[j];
 
-            // Backward through self-attention
-            List<double[]> dSaOutputs = SelfAttention.Backward (new List<double[]> { dSaAdded });
+            dSaAdded.Add (dSaAdd);
+        }
 
+        // Backward through Self-Attention and first residual connection
+        List<double[]> dNormedInputs = SelfAttention.Backward (dSaAdded);
+
+        for (int i = 0; i < seqLen; i++) {
             // Backprop through first LayerNorm
-            double[] dNormedInputs = Norm1.Backward (dSaOutputs[0]);
+            double[] dInputNorm = Norm1.Backward (dNormedInputs[i]);
 
             // Sum gradients from residual connection
             for (int j = 0; j < EmbedSize; j++)
-                dInputs[i][j] += dNormedInputs[j] + dSaAdded[j];
+                dInputs[i][j] += dInputNorm[j] + dSaAdded[i][j];
         }
 
         return dInputs;
@@ -589,7 +617,7 @@ public class LlamaForCausalLM
         double[] dEmbedding = FinalLayerNorm.Backward (dFinalEmbedding);
 
         // Initialize gradients for embeddings
-        List<double[]> dEmbeddings = new List<double[]> (embeddings.Count);
+        List<double[]> dEmbeddings = new List<double[]> ();
         for (int i = 0; i < embeddings.Count; i++)
             dEmbeddings.Add (new double[EmbedSize]);
 
