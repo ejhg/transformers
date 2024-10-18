@@ -14,20 +14,6 @@ public static class MathOps
         return result;
     }
 
-    public static double[] Subtract (double[] a, double[] b) {
-        double[] result = new double[a.Length];
-        for (int i = 0; i < a.Length; i++)
-            result[i] = a[i] - b[i];
-        return result;
-    }
-
-    public static double[] Multiply (double[] a, double scalar) {
-        double[] result = new double[a.Length];
-        for (int i = 0; i < a.Length; i++)
-            result[i] = a[i] * scalar;
-        return result;
-    }
-
     public static double Dot (double[] a, double[] b) {
         double result = 0;
         for (int i = 0; i < a.Length; i++)
