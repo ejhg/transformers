@@ -34,29 +34,6 @@ public static class MathOps
         return result;
     }
 
-    public static double[] MatrixVectorProductTranspose (double[,] matrix, double[] vector) {
-        int rows = matrix.GetLength (0);
-        int cols = matrix.GetLength (1);
-        double[] result = new double[cols];
-        for (int j = 0; j < cols; j++) {
-            result[j] = 0;
-            for (int i = 0; i < rows; i++)
-                result[j] += matrix[i, j] * vector[i];
-        }
-
-        return result;
-    }
-
-    public static double[,] OuterProduct (double[] a, double[] b) {
-        int rows = a.Length;
-        int cols = b.Length;
-        double[,] result = new double[rows, cols];
-        for (int i = 0; i < rows; i++)
-        for (int j = 0; j < cols; j++)
-            result[i, j] = a[i] * b[j];
-        return result;
-    }
-
     public static double[] Softmax (double[] logits) {
         double maxLogit = logits.Max ();
         double[] expLogits = logits.Select (x => Math.Exp (x - maxLogit)).ToArray ();

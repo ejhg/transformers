@@ -18,7 +18,8 @@ public class LlamaTest
             embeddingSize,
             hiddenSize,
             hiddenSize / numHeads,
-            numLayers: 4);
+            numLayers: 4,
+            new Random ());
         var optimizer = new SGDOptimizer (learningRate: 0.0005);
 
         Trainer.train (
