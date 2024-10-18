@@ -45,12 +45,12 @@ public static class MathOps
         int n = softmax.Length;
         double[] dScores = new double[n];
 
-        for (int i = 0; i < n; i++) {
-            for (int j = 0; j < n; j++) {
-                double delta = (i == j) ? 1.0 : 0.0;
-                dScores[i] += softmax[i] * (delta - softmax[j]) * dLoss_dSoftmax[j];
-            }
-        }
+        double dot = 0.0;
+        for (int i = 0; i < n; i++)
+            dot += softmax[i] * dLoss_dSoftmax[i];
+
+        for (int i = 0; i < n; i++)
+            dScores[i] = softmax[i] * (dLoss_dSoftmax[i] - dot);
 
         return dScores;
     }
@@ -91,10 +91,6 @@ public class LayerNorm
     public double[] Gamma;
     public double[] Beta;
     public int Size;
-    private double[] x_input;
-    private double mean;
-    private double variance;
-    private double[] normalized;
 
     public double[] dGamma;
     public double[] dBeta;
@@ -111,33 +107,48 @@ public class LayerNorm
         }
     }
 
-    public double[] Forward (double[] x) {
-        x_input = x;
-        mean = x.Average ();
-        variance = x.Select (val => Math.Pow (val - mean, 2)).Average ();
-        normalized = x.Select (val => (val - mean) / Math.Sqrt (variance + 1e-5)).ToArray ();
+    public (double[] output, LayerNormCache cache) Forward (double[] x) {
+        double mean = x.Average ();
+        double variance = x.Select (val => Math.Pow (val - mean, 2)).Average ();
+        double[] normalized = x.Select (val => (val - mean) / Math.Sqrt (variance + 1e-5)).ToArray ();
         double[] output = new double[Size];
         for (int i = 0; i < Size; i++)
             output[i] = Gamma[i] * normalized[i] + Beta[i];
-        return output;
+
+        var cache = new LayerNormCache {
+            x_input = x,
+            mean = mean,
+            variance = variance,
+            normalized = normalized
+        };
+
+        return (output, cache);
     }
 
-    public double[] Backward (double[] gradOutput) {
+    public double[] Backward (double[] gradOutput, LayerNormCache cache) {
         double[] dxhat = new double[Size];
         for (int i = 0; i < Size; i++) {
-            dGamma[i] += gradOutput[i] * normalized[i];
+            dGamma[i] += gradOutput[i] * cache.normalized[i];
             dBeta[i] += gradOutput[i];
             dxhat[i] = gradOutput[i] * Gamma[i];
         }
 
-        double stdInv = 1.0 / Math.Sqrt (variance + 1e-5);
+        double stdInv = 1.0 / Math.Sqrt (cache.variance + 1e-5);
         double[] dx = new double[Size];
-        double dvar = -0.5 * stdInv * stdInv * stdInv * dxhat.Select ((dxh, i) => (x_input[i] - mean) * dxh).Sum ();
-        double dmean = -stdInv * dxhat.Sum () + dvar * (-2.0 / Size) * (x_input.Sum () - Size * mean);
+        double dvar = -0.5 * stdInv * stdInv * stdInv * dxhat.Select ((dxh, i) => (cache.x_input[i] - cache.mean) * dxh).Sum ();
+        double dmean = -stdInv * dxhat.Sum () + dvar * (-2.0 / Size) * (cache.x_input.Sum () - Size * cache.mean);
         for (int i = 0; i < Size; i++)
-            dx[i] = stdInv * dxhat[i] + dvar * 2.0 * (x_input[i] - mean) / Size + dmean / Size;
+            dx[i] = stdInv * dxhat[i] + dvar * 2.0 * (cache.x_input[i] - cache.mean) / Size + dmean / Size;
         return dx;
     }
+}
+
+public class LayerNormCache
+{
+    public double[] x_input;
+    public double mean;
+    public double variance;
+    public double[] normalized;
 }
 
 // Self-Attention mechanism with backward pass
@@ -146,10 +157,6 @@ public class SelfAttention
     public double[,] Wq, Wk, Wv, Wo;
     public double[,] dWq, dWk, dWv, dWo;
     public int EmbedSize, HeadSize;
-
-    private List<double[]> Qs, Ks, Vs, Zs;
-    private List<double[]> Inputs;
-    private List<double[]> Softmaxes;
 
     private Random rand;
 
@@ -176,20 +183,23 @@ public class SelfAttention
         return matrix;
     }
 
-    public List<double[]> Forward (List<double[]> inputs) {
-        Inputs = inputs;
+    public (List<double[]> outputs, SelfAttentionCache cache) Forward (List<double[]> inputs) {
         int seqLen = inputs.Count;
-        Qs = new List<double[]> ();
-        Ks = new List<double[]> ();
-        Vs = new List<double[]> ();
-        Zs = new List<double[]> ();
-        Softmaxes = new List<double[]> ();
+
+        var cache = new SelfAttentionCache {
+            Inputs = inputs,
+            Qs = new List<double[]> (),
+            Ks = new List<double[]> (),
+            Vs = new List<double[]> (),
+            Zs = new List<double[]> (),
+            Softmaxes = new List<double[]> ()
+        };
 
         // Compute Qs, Ks, Vs
         foreach (var x in inputs) {
-            Qs.Add (MathOps.MatrixVectorProduct (Wq, x));
-            Ks.Add (MathOps.MatrixVectorProduct (Wk, x));
-            Vs.Add (MathOps.MatrixVectorProduct (Wv, x));
+            cache.Qs.Add (MathOps.MatrixVectorProduct (Wq, x));
+            cache.Ks.Add (MathOps.MatrixVectorProduct (Wk, x));
+            cache.Vs.Add (MathOps.MatrixVectorProduct (Wv, x));
         }
 
         // Compute attention outputs
@@ -197,32 +207,32 @@ public class SelfAttention
             // Compute attention scores up to position i
             double[] scores = new double[i + 1];
             for (int j = 0; j <= i; j++)
-                scores[j] = MathOps.Dot (Qs[i], Ks[j]) / Math.Sqrt (HeadSize);
+                scores[j] = MathOps.Dot (cache.Qs[i], cache.Ks[j]) / Math.Sqrt (HeadSize);
 
             // Apply softmax to get attention weights
             double[] softmax = MathOps.Softmax (scores);
-            Softmaxes.Add (softmax);
+            cache.Softmaxes.Add (softmax);
 
             // Compute weighted sum of Vs
             double[] z = new double[HeadSize];
             for (int j = 0; j <= i; j++)
             for (int k = 0; k < HeadSize; k++)
-                z[k] += softmax[j] * Vs[j][k];
-            Zs.Add (z);
+                z[k] += softmax[j] * cache.Vs[j][k];
+            cache.Zs.Add (z);
         }
 
         // Output projection
         List<double[]> outputs = new List<double[]> ();
         for (int i = 0; i < seqLen; i++) {
-            double[] output = MathOps.MatrixVectorProduct (Wo, Zs[i]);
+            double[] output = MathOps.MatrixVectorProduct (Wo, cache.Zs[i]);
             outputs.Add (output);
         }
 
-        return outputs;
+        return (outputs, cache);
     }
 
-    public List<double[]> Backward (List<double[]> gradOutputs) {
-        int seqLen = Inputs.Count;
+    public List<double[]> Backward (List<double[]> gradOutputs, SelfAttentionCache cache) {
+        int seqLen = cache.Inputs.Count;
         List<double[]> dInputs = new List<double[]> ();
         for (int i = 0; i < seqLen; i++)
             dInputs.Add (new double[EmbedSize]);
@@ -244,7 +254,7 @@ public class SelfAttention
             for (int k = 0; k < EmbedSize; k++) {
                 for (int h = 0; h < HeadSize; h++) {
                     dZ[h] += Wo[k, h] * gradOutputs[i][k];
-                    dWo[k, h] += gradOutputs[i][k] * Zs[i][h];
+                    dWo[k, h] += gradOutputs[i][k] * cache.Zs[i][h];
                 }
             }
 
@@ -252,21 +262,21 @@ public class SelfAttention
             double[] dAlpha = new double[i + 1];
             for (int j = 0; j <= i; j++) {
                 for (int h = 0; h < HeadSize; h++) {
-                    dVs[j][h] += Softmaxes[i][j] * dZ[h];
+                    dVs[j][h] += cache.Softmaxes[i][j] * dZ[h];
                 }
 
-                dAlpha[j] = MathOps.Dot (Vs[j], dZ);
+                dAlpha[j] = MathOps.Dot (cache.Vs[j], dZ);
             }
 
             // Backpropagate through softmax
-            double[] dScores = MathOps.SoftmaxGradient (Softmaxes[i], dAlpha);
+            double[] dScores = MathOps.SoftmaxGradient (cache.Softmaxes[i], dAlpha);
 
             // Backpropagate through attention scores s_{ij} = Q_i ⋅ K_j / sqrt(HeadSize)
             double scale = 1.0 / Math.Sqrt (HeadSize);
             for (int j = 0; j <= i; j++) {
                 for (int h = 0; h < HeadSize; h++) {
-                    dQs[i][h] += dScores[j] * Ks[j][h] * scale;
-                    dKs[j][h] += dScores[j] * Qs[i][h] * scale;
+                    dQs[i][h] += dScores[j] * cache.Ks[j][h] * scale;
+                    dKs[j][h] += dScores[j] * cache.Qs[i][h] * scale;
                 }
             }
         }
@@ -276,7 +286,7 @@ public class SelfAttention
             // Gradients w.r.t. Wq and input x_i
             for (int h = 0; h < HeadSize; h++) {
                 for (int j = 0; j < EmbedSize; j++) {
-                    dWq[h, j] += dQs[i][h] * Inputs[i][j];
+                    dWq[h, j] += dQs[i][h] * cache.Inputs[i][j];
                     dInputs[i][j] += Wq[h, j] * dQs[i][h];
                 }
             }
@@ -284,7 +294,7 @@ public class SelfAttention
             // Gradients w.r.t. Wk and input x_i
             for (int h = 0; h < HeadSize; h++) {
                 for (int j = 0; j < EmbedSize; j++) {
-                    dWk[h, j] += dKs[i][h] * Inputs[i][j];
+                    dWk[h, j] += dKs[i][h] * cache.Inputs[i][j];
                     dInputs[i][j] += Wk[h, j] * dKs[i][h];
                 }
             }
@@ -292,7 +302,7 @@ public class SelfAttention
             // Gradients w.r.t. Wv and input x_i
             for (int h = 0; h < HeadSize; h++) {
                 for (int j = 0; j < EmbedSize; j++) {
-                    dWv[h, j] += dVs[i][h] * Inputs[i][j];
+                    dWv[h, j] += dVs[i][h] * cache.Inputs[i][j];
                     dInputs[i][j] += Wv[h, j] * dVs[i][h];
                 }
             }
@@ -302,13 +312,23 @@ public class SelfAttention
     }
 }
 
+public class SelfAttentionCache
+{
+    public List<double[]> Inputs;
+    public List<double[]> Qs;
+    public List<double[]> Ks;
+    public List<double[]> Vs;
+    public List<double[]> Zs;
+    public List<double[]> Softmaxes;
+}
+
 // Feed-Forward Network with backward pass
 public class FeedForward
 {
     public double[,] W1, W2;
     public double[] B1, B2;
     public int EmbedSize, HiddenSize;
-    private double[] x_input, h_linear, h_relu;
+
     public double[,] dW1, dW2;
     public double[] dB1, dB2;
     private Random rand;
@@ -336,18 +356,19 @@ public class FeedForward
         return matrix;
     }
 
-    public double[] Forward (double[] x) {
-        x_input = x;
-        h_linear = new double[HiddenSize];
-        h_relu = new double[HiddenSize];
-
+    public (double[] output, FeedForwardCache cache) Forward (double[] x) {
         // First layer
+        double[] h_linear = new double[HiddenSize];
         for (int i = 0; i < HiddenSize; i++) {
             h_linear[i] = B1[i];
             for (int j = 0; j < EmbedSize; j++)
                 h_linear[i] += W1[i, j] * x[j];
-            h_relu[i] = Math.Max (0, h_linear[i]);
         }
+
+        // ReLU activation
+        double[] h_relu = new double[HiddenSize];
+        for (int i = 0; i < HiddenSize; i++)
+            h_relu[i] = Math.Max (0, h_linear[i]);
 
         // Second layer
         double[] y = new double[EmbedSize];
@@ -357,17 +378,23 @@ public class FeedForward
                 y[i] += W2[i, j] * h_relu[j];
         }
 
-        return y;
+        var cache = new FeedForwardCache {
+            x_input = x,
+            h_linear = h_linear,
+            h_relu = h_relu
+        };
+
+        return (y, cache);
     }
 
-    public double[] Backward (double[] dOut) {
+    public double[] Backward (double[] dOut, FeedForwardCache cache) {
         double[] dh_relu = new double[HiddenSize];
 
         // Backprop through second layer
         for (int i = 0; i < EmbedSize; i++) {
             dB2[i] += dOut[i];
             for (int j = 0; j < HiddenSize; j++) {
-                dW2[i, j] += dOut[i] * h_relu[j];
+                dW2[i, j] += dOut[i] * cache.h_relu[j];
                 dh_relu[j] += dOut[i] * W2[i, j];
             }
         }
@@ -375,20 +402,27 @@ public class FeedForward
         // Backprop through ReLU
         double[] dh_linear = new double[HiddenSize];
         for (int i = 0; i < HiddenSize; i++)
-            dh_linear[i] = h_linear[i] > 0 ? dh_relu[i] : 0;
+            dh_linear[i] = cache.h_linear[i] > 0 ? dh_relu[i] : 0;
 
         // Backprop through first layer
         double[] dx = new double[EmbedSize];
         for (int i = 0; i < HiddenSize; i++) {
             dB1[i] += dh_linear[i];
             for (int j = 0; j < EmbedSize; j++) {
-                dW1[i, j] += dh_linear[i] * x_input[j];
+                dW1[i, j] += dh_linear[i] * cache.x_input[j];
                 dx[j] += dh_linear[i] * W1[i, j];
             }
         }
 
         return dx;
     }
+}
+
+public class FeedForwardCache
+{
+    public double[] x_input;
+    public double[] h_linear;
+    public double[] h_relu;
 }
 
 // Transformer Block with backward pass
@@ -399,14 +433,6 @@ public class TransformerBlock
     public FeedForward FeedForward;
     public int EmbedSize;
 
-    private List<double[]> inputs;
-    private List<double[]> normedInputs;
-    private List<double[]> saOutputs;
-    private List<double[]> saAdded;
-    private List<double[]> normedSaAdded;
-    private List<double[]> ffOutputs;
-    private List<double[]> ffAdded;
-
     public TransformerBlock (int embedSize, int hiddenSize, int headSize, Random random) {
         EmbedSize = embedSize;
         Norm1 = new LayerNorm (embedSize);
@@ -415,43 +441,53 @@ public class TransformerBlock
         FeedForward = new FeedForward (embedSize, hiddenSize, random);
     }
 
-    public List<double[]> Forward (List<double[]> inputs) {
-        this.inputs = inputs;
+    public (List<double[]> outputs, TransformerBlockCache cache) Forward (List<double[]> inputs) {
         int seqLen = inputs.Count;
-        normedInputs = new List<double[]> ();
-        saOutputs = new List<double[]> ();
-        saAdded = new List<double[]> ();
-        normedSaAdded = new List<double[]> ();
-        ffOutputs = new List<double[]> ();
-        ffAdded = new List<double[]> ();
+
+        var cache = new TransformerBlockCache {
+            inputs = inputs,
+            normedInputs = new List<double[]> (),
+            norm1Caches = new List<LayerNormCache> (),
+            saOutputs = new List<double[]> (),
+            saCache = null,
+            saAdded = new List<double[]> (),
+            normedSaAdded = new List<double[]> (),
+            norm2Caches = new List<LayerNormCache> (),
+            ffOutputs = new List<double[]> (),
+            ffCaches = new List<FeedForwardCache> (),
+            ffAdded = new List<double[]> ()
+        };
 
         // Apply first LayerNorm and Self-Attention
         foreach (var x in inputs) {
-            var normedInput = Norm1.Forward (x);
-            normedInputs.Add (normedInput);
+            var (normedInput, norm1Cache) = Norm1.Forward (x);
+            cache.normedInputs.Add (normedInput);
+            cache.norm1Caches.Add (norm1Cache);
         }
 
-        saOutputs = SelfAttention.Forward (normedInputs);
+        (cache.saOutputs, cache.saCache) = SelfAttention.Forward (cache.normedInputs);
 
         // Add & Norm
         for (int i = 0; i < seqLen; i++) {
-            var saAdd = MathOps.Add (inputs[i], saOutputs[i]);
-            saAdded.Add (saAdd);
+            var saAdd = MathOps.Add (inputs[i], cache.saOutputs[i]);
+            cache.saAdded.Add (saAdd);
 
-            var normedSaAdd = Norm2.Forward (saAdd);
-            normedSaAdded.Add (normedSaAdd);
+            var (normedSaAdd, norm2Cache) = Norm2.Forward (saAdd);
+            cache.normedSaAdded.Add (normedSaAdd);
+            cache.norm2Caches.Add (norm2Cache);
 
-            var ffOutput = FeedForward.Forward (normedSaAdd);
-            ffOutputs.Add (ffOutput);
+            var (ffOutput, ffCache) = FeedForward.Forward (normedSaAdd);
+            cache.ffOutputs.Add (ffOutput);
+            cache.ffCaches.Add (ffCache);
 
             var ffAdd = MathOps.Add (saAdd, ffOutput);
-            ffAdded.Add (ffAdd);
+            cache.ffAdded.Add (ffAdd);
         }
 
-        return ffAdded;
+        return (cache.ffAdded, cache);
     }
 
-    public List<double[]> Backward (List<double[]> gradOutputs) {
+    public List<double[]> Backward (List<double[]> gradOutputs, TransformerBlockCache cache) {
         int seqLen = gradOutputs.Count;
         List<double[]> dInputs = new List<double[]> ();
         for (int i = 0; i < seqLen; i++)
@@ -476,7 +512,7 @@ public class TransformerBlock
             }
 
             // Backprop through feed-forward layer
-            double[] dNormedSaAddedSingle = FeedForward.Backward (dFfOutput);
+            double[] dNormedSaAddedSingle = FeedForward.Backward (dFfOutput, cache.ffCaches[i]);
             dNormedSaAdded.Add (dNormedSaAddedSingle);
 
             // Accumulate gradients
@@ -490,11 +526,11 @@ public class TransformerBlock
         // Backward through second LayerNorm
         List<double[]> dSaAddedNorm = new List<double[]> ();
         for (int i = 0; i < seqLen; i++) {
-            dSaAddedNorm.Add (Norm2.Backward (dSaAdded[i]));
+            dSaAddedNorm.Add (Norm2.Backward (dSaAdded[i], cache.norm2Caches[i]));
         }
 
         // Backward through Self-Attention and first residual connection
-        List<double[]> dNormedInputs = SelfAttention.Backward (dSaAddedNorm);
+        List<double[]> dNormedInputs = SelfAttention.Backward (dSaAddedNorm, cache.saCache);
 
         for (int i = 0; i < seqLen; i++) {
             // Backprop through first residual connection
@@ -503,7 +539,7 @@ public class TransformerBlock
             }
 
             // Backprop through first LayerNorm
-            double[] dInputNorm = Norm1.Backward (dNormedInputs[i]);
+            double[] dInputNorm = Norm1.Backward (dNormedInputs[i], cache.norm1Caches[i]);
 
             // Accumulate gradients
             for (int j = 0; j < EmbedSize; j++) {
@@ -513,6 +549,21 @@ public class TransformerBlock
 
         return dInputs;
     }
+}
+
+public class TransformerBlockCache
+{
+    public List<double[]> inputs;
+    public List<double[]> normedInputs;
+    public List<LayerNormCache> norm1Caches;
+    public List<double[]> saOutputs;
+    public SelfAttentionCache saCache;
+    public List<double[]> saAdded;
+    public List<double[]> normedSaAdded;
+    public List<LayerNormCache> norm2Caches;
+    public List<double[]> ffOutputs;
+    public List<FeedForwardCache> ffCaches;
+    public List<double[]> ffAdded;
 }
 
 // LlamaForCausalLM Model with backward pass
@@ -527,6 +578,9 @@ public class LlamaForCausalLM
 
     private List<double[]> embeddings;
     private int[] inputTokens;
+    private List<double[]> finalEmbeddings;
+    private List<LayerNormCache> finalLayerNormCaches;
+    private List<TransformerBlockCache> transformerCaches;
 
     private Random rand;
 
@@ -559,12 +613,20 @@ public class LlamaForCausalLM
         embeddings = inputTokens.Select (token => TokenEmbedding.Forward (token)).ToList ();
 
         // Process through transformer blocks
+        transformerCaches = new List<TransformerBlockCache> ();
         foreach (var block in TransformerBlocks) {
-            embeddings = block.Forward (embeddings);
+            (embeddings, var cache) = block.Forward (embeddings);
+            transformerCaches.Add (cache);
         }
 
         // Apply final layer normalization to each token's embedding
-        List<double[]> finalEmbeddings = embeddings.Select (e => FinalLayerNorm.Forward (e)).ToList ();
+        finalLayerNormCaches = new List<LayerNormCache> ();
+        finalEmbeddings = new List<double[]> ();
+        foreach (var e in embeddings) {
+            (var finalEmbedding, var cache) = FinalLayerNorm.Forward (e);
+            finalEmbeddings.Add (finalEmbedding);
+            finalLayerNormCaches.Add (cache);
+        }
 
         // Compute logits for each time step
         List<double[]> logitsList = new List<double[]> ();
@@ -586,7 +648,8 @@ public class LlamaForCausalLM
 
         // Backward through OutputProjection for each time step
         for (int t = 0; t < embeddings.Count; t++) {
-            double[] finalEmbedding = FinalLayerNorm.Forward (embeddings[t]);
+            // Use cached final embeddings
+            var finalEmbedding = finalEmbeddings[t];
 
             // Gradients w.r.t. OutputProjection
             for (int i = 0; i < VocabSize; i++) {
@@ -603,17 +666,17 @@ public class LlamaForCausalLM
             }
 
             // Backward through FinalLayerNorm
-            double[] dEmbedding = FinalLayerNorm.Backward (dFinalEmbedding);
+            double[] dEmbedding = FinalLayerNorm.Backward (dFinalEmbedding, finalLayerNormCaches[t]);
 
             // Accumulate gradients
             for (int j = 0; j < EmbedSize; j++)
                 dEmbeddings[t][j] += dEmbedding[j];
         }
 
-        // Backward through TransformerBlocks
+        // Backward through TransformerBlocks in reverse order
         for (int i = TransformerBlocks.Count - 1; i >= 0; i--) {
             var block = TransformerBlocks[i];
-            dEmbeddings = block.Backward (dEmbeddings);
+            dEmbeddings = block.Backward (dEmbeddings, transformerCaches[i]);
         }
 
         // Backward through TokenEmbedding
