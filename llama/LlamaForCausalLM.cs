@@ -73,22 +73,6 @@ public static class MathOps
         double sumExp = expLogits.Sum ();
         return expLogits.Select (x => x / sumExp).ToArray ();
     }
-
-    public static double[] SoftmaxGradient (double[] softmax, double[] dSoftmax) {
-        int n = softmax.Length;
-        double[] dLogits = new double[n];
-        for (int i = 0; i < n; i++) {
-            double sum = 0;
-            for (int j = 0; j < n; j++) {
-                double delta = i == j ? 1.0 : 0.0;
-                sum += dSoftmax[j] * softmax[i] * (delta - softmax[j]);
-            }
-
-            dLogits[i] = sum;
-        }
-
-        return dLogits;
-    }
 }
 
 // Embedding layer with backward pass
@@ -257,7 +241,10 @@ public class SelfAttention
 
     public List<double[]> Backward (List<double[]> gradOutputs) {
         int seqLen = Inputs.Count;
-        List<double[]> dInputs = new List<double[]> (new double[seqLen][]);
+        List<double[]> dInputs = new List<double[]> ();
+        for (int i = 0; i < seqLen; i++)
+            dInputs[i] = new double[EmbedSize];
+
         // Initialize gradients for Qs, Ks, Vs
         double[][] dQs = new double[seqLen][];
         double[][] dKs = new double[seqLen][];
@@ -268,10 +255,11 @@ public class SelfAttention
             dVs[i] = new double[HeadSize];
         }
 
-        // Backward through time
-        for (int i = seqLen - 1; i >= 0; i--) {
-            // Backward through output projection Wo
+        // Gradients w.r.t. output projection Wo
+        for (int i = 0; i < seqLen; i++) {
+            // Gradient w.r.t. z_i
             double[] dZ = MathOps.MatrixVectorProductTranspose (Wo, gradOutputs[i]);
+
             // Accumulate gradients for Wo
             double[,] dWo_temp = MathOps.OuterProduct (gradOutputs[i], Zs[i]);
             for (int m = 0; m < Wo.GetLength (0); m++)
@@ -279,59 +267,63 @@ public class SelfAttention
                 dWo[m, n] += dWo_temp[m, n];
 
             // Backprop through attention
-            double[] dSoftmax = new double[i + 1];
-            for (int j = 0; j <= i; j++)
-            for (int k = 0; k < HeadSize; k++)
-                dVs[j][k] += dZ[k] * Softmaxes[i][j];
-            for (int k = 0; k < HeadSize; k++)
-            for (int j = 0; j <= i; j++)
-                dSoftmax[j] += dZ[k] * Vs[j][k];
-
-            double[] dScores = MathOps.SoftmaxGradient (Softmaxes[i], dSoftmax);
-
-            // Backprop to Q and Ks
+            double[] dAlpha = new double[i + 1];
             for (int j = 0; j <= i; j++) {
-                double scale = 1.0 / Math.Sqrt (HeadSize);
-                for (int k = 0; k < HeadSize; k++) {
-                    dQs[i][k] += dScores[j] * Ks[j][k] * scale;
-                    dKs[j][k] += dScores[j] * Qs[i][k] * scale;
+                // dAlpha_{ij} = V_j^T * dZ_i
+                dAlpha[j] = MathOps.Dot (Vs[j], dZ);
+
+                // dV_j += alpha_{ij} * dZ_i
+                for (int k = 0; k < HeadSize; k++)
+                    dVs[j][k] += dZ[k] * Softmaxes[i][j];
+            }
+
+            // Compute gradients w.r.t. scores s_{ij}
+            double[] dScores = new double[i + 1];
+            for (int j = 0; j <= i; j++) {
+                for (int l = 0; l <= i; l++) {
+                    double delta = j == l ? 1.0 : 0.0;
+                    dScores[j] += Softmaxes[i][l] * (delta - Softmaxes[i][j]) * dAlpha[l];
                 }
+            }
+
+            // Compute gradients w.r.t. Q_i and K_j
+            double scale = 1.0 / Math.Sqrt (HeadSize);
+            for (int j = 0; j <= i; j++) {
+                // dQ_i += dScores[j] * K_j * scale
+                for (int k = 0; k < HeadSize; k++)
+                    dQs[i][k] += dScores[j] * Ks[j][k] * scale;
+
+                // dK_j += dScores[j] * Q_i * scale
+                for (int k = 0; k < HeadSize; k++)
+                    dKs[j][k] += dScores[j] * Qs[i][k] * scale;
             }
         }
 
-        // Backprop through Wq, Wk, Wv
+        // Backpropagate through linear layers Wq, Wk, Wv
         for (int i = 0; i < seqLen; i++) {
-            // Gradients w.r.t. inputs
-            double[] dInput = new double[EmbedSize];
-
-            // Wq
+            // Gradients w.r.t. Wq and input x_i
             double[,] dWq_temp = MathOps.OuterProduct (dQs[i], Inputs[i]);
             for (int m = 0; m < Wq.GetLength (0); m++)
             for (int n = 0; n < Wq.GetLength (1); n++) {
                 dWq[m, n] += dWq_temp[m, n];
-                dInput[n] += Wq[m, n] * dQs[i][m];
+                dInputs[i][n] += Wq[m, n] * dQs[i][m];
             }
 
-            // Wk and Wv
-            for (int j = 0; j <= i; j++) {
-                // Wk
-                double[,] dWk_temp = MathOps.OuterProduct (dKs[j], Inputs[j]);
-                for (int m = 0; m < Wk.GetLength (0); m++)
-                for (int n = 0; n < Wk.GetLength (1); n++) {
-                    dWk[m, n] += dWk_temp[m, n];
-                    dInput[n] += Wk[m, n] * dKs[j][m];
-                }
-
-                // Wv
-                double[,] dWv_temp = MathOps.OuterProduct (dVs[j], Inputs[j]);
-                for (int m = 0; m < Wv.GetLength (0); m++)
-                for (int n = 0; n < Wv.GetLength (1); n++) {
-                    dWv[m, n] += dWv_temp[m, n];
-                    dInput[n] += Wv[m, n] * dVs[j][m];
-                }
+            // Gradients w.r.t. Wk and input x_i
+            double[,] dWk_temp = MathOps.OuterProduct (dKs[i], Inputs[i]);
+            for (int m = 0; m < Wk.GetLength (0); m++)
+            for (int n = 0; n < Wk.GetLength (1); n++) {
+                dWk[m, n] += dWk_temp[m, n];
+                dInputs[i][n] += Wk[m, n] * dKs[i][m];
             }
 
-            dInputs[i] = dInput;
+            // Gradients w.r.t. Wv and input x_i
+            double[,] dWv_temp = MathOps.OuterProduct (dVs[i], Inputs[i]);
+            for (int m = 0; m < Wv.GetLength (0); m++)
+            for (int n = 0; n < Wv.GetLength (1); n++) {
+                dWv[m, n] += dWv_temp[m, n];
+                dInputs[i][n] += Wv[m, n] * dVs[i][m];
+            }
         }
 
         return dInputs;
@@ -474,56 +466,49 @@ public class TransformerBlock
 
     public List<double[]> Backward (List<double[]> gradOutputs) {
         int seqLen = gradOutputs.Count;
-        List<double[]> dInputs = new List<double[]> (new double[seqLen][]);
-        List<double[]> dSaAdded = new List<double[]> (new double[seqLen][]);
-        List<double[]> dNormedSaAdded = new List<double[]> (new double[seqLen][]);
-        List<double[]> dSaOutputs = new List<double[]> (new double[seqLen][]);
-        List<double[]> dNormedInputs = new List<double[]> (new double[seqLen][]);
+        List<double[]> dInputs = new List<double[]> ();
 
-        for (int i = seqLen - 1; i >= 0; i--) {
-            // Backward through addition (ffAdded)
-            double[] dSaAddedVec = new double[EmbedSize];
+        // Initialize gradients
+        for (int i = 0; i < seqLen; i++)
+            dInputs.Add (new double[EmbedSize]);
+
+        // Gradients after feed-forward layer
+        List<double[]> dFeedForward = new List<double[]> (new double[seqLen][]);
+        for (int i = 0; i < seqLen; i++)
+            dFeedForward.Add (new double[EmbedSize]);
+
+        // Backward through residual connection and feed-forward layer
+        for (int i = 0; i < seqLen; i++) {
+            // Gradients w.r.t. the output of the feed-forward layer
+            double[] dFfAdded = gradOutputs[i];
+
+            // Backprop through residual connection
             double[] dFfOutput = new double[EmbedSize];
-
+            double[] dSaAdded = new double[EmbedSize];
             for (int j = 0; j < EmbedSize; j++) {
-                dSaAddedVec[j] += gradOutputs[i][j];
-                dFfOutput[j] = gradOutputs[i][j];
+                dFfOutput[j] = dFfAdded[j];
+                dSaAdded[j] = dFfAdded[j];
             }
 
-            // Backward through FeedForward
-            double[] dNormedSaAddedVec = FeedForward.Backward (dFfOutput);
+            // Backprop through feed-forward layer
+            double[] dNormedSaAdded = FeedForward.Backward (dFfOutput);
 
-            // Backward through second LayerNorm
-            double[] dSaAddedVec2 = Norm2.Backward (dNormedSaAddedVec);
-
-            // Sum gradients from both paths
-            for (int j = 0; j < EmbedSize; j++)
-                dSaAddedVec[j] += dSaAddedVec2[j];
-
-            dSaAdded[i] = dSaAddedVec;
-
-            // Backward through addition (saAdded)
-            double[] dSaOutput = new double[EmbedSize];
-            double[] dInput = new double[EmbedSize];
-            for (int j = 0; j < EmbedSize; j++) {
-                dInput[j] = dSaAdded[i][j];
-                dSaOutput[j] = dSaAdded[i][j];
-            }
-
-            dSaOutputs.Add (dSaOutput);
-
-            // Backward through SelfAttention
-            List<double[]> dNormedInputsTemp = SelfAttention.Backward (new List<double[]> { dSaOutput });
-            dNormedInputs.Add (dNormedInputsTemp[i]);
-
-            // Backward through first LayerNorm
-            double[] dInputNorm = Norm1.Backward (dNormedInputs[i]);
+            // Backprop through second LayerNorm
+            double[] dSaAddedNorm = Norm2.Backward (dNormedSaAdded);
 
             // Sum gradients from residual connection
             for (int j = 0; j < EmbedSize; j++)
-                dInput[j] += dInputNorm[j];
+                dSaAdded[j] += dSaAddedNorm[j];
 
-            dInputs[i] = dInput;
+            // Backward through self-attention
+            List<double[]> dSaOutputs = SelfAttention.Backward (new List<double[]> { dSaAdded });
+
+            // Backprop through first LayerNorm
+            double[] dNormedInputs = Norm1.Backward (dSaOutputs[0]);
+
+            // Sum gradients from residual connection
+            for (int j = 0; j < EmbedSize; j++)
+                dInputs[i][j] += dNormedInputs[j] + dSaAdded[j];
         }
 
         return dInputs;
