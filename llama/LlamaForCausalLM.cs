@@ -60,13 +60,22 @@ public static class MathOps
 public class Embedding
 {
     public double[,] Weights;
+
     public double[,] Gradients;
+
+    // For Adam optimizer
+    public double[,] mWeights;
+    public double[,] vWeights;
+
     private Random rand;
 
     public Embedding (int vocabSize, int embedSize, Random random) {
         rand = random;
         Weights = new double[vocabSize, embedSize];
         Gradients = new double[vocabSize, embedSize];
+        mWeights = new double[vocabSize, embedSize];
+        vWeights = new double[vocabSize, embedSize];
+
         for (int i = 0; i < vocabSize; i++)
         for (int j = 0; j < embedSize; j++)
             Weights[i, j] = rand.NextDouble () * 0.02 - 0.01;
@@ -95,12 +104,24 @@ public class LayerNorm
     public double[] dGamma;
     public double[] dBeta;
 
+    // For Adam optimizer
+    public double[] mGamma;
+    public double[] vGamma;
+    public double[] mBeta;
+    public double[] vBeta;
+
     public LayerNorm (int size) {
         Size = size;
         Gamma = new double[size];
         Beta = new double[size];
         dGamma = new double[size];
         dBeta = new double[size];
+
+        mGamma = new double[size];
+        vGamma = new double[size];
+        mBeta = new double[size];
+        vBeta = new double[size];
+
         for (int i = 0; i < size; i++) {
             Gamma[i] = 1.0;
             Beta[i] = 0.0;
@@ -155,7 +176,15 @@ public class LayerNormCache
 public class SelfAttention
 {
     public double[,] Wq, Wk, Wv, Wo;
+
     public double[,] dWq, dWk, dWv, dWo;
+
+    // For Adam optimizer
+    public double[,] mWq, vWq;
+    public double[,] mWk, vWk;
+    public double[,] mWv, vWv;
+    public double[,] mWo, vWo;
+
     public int EmbedSize, HeadSize;
 
     private Random rand;
@@ -173,6 +202,15 @@ public class SelfAttention
         dWk = new double[HeadSize, EmbedSize];
         dWv = new double[HeadSize, EmbedSize];
         dWo = new double[EmbedSize, HeadSize];
+
+        mWq = new double[HeadSize, EmbedSize];
+        vWq = new double[HeadSize, EmbedSize];
+        mWk = new double[HeadSize, EmbedSize];
+        vWk = new double[HeadSize, EmbedSize];
+        mWv = new double[HeadSize, EmbedSize];
+        vWv = new double[HeadSize, EmbedSize];
+        mWo = new double[EmbedSize, HeadSize];
+        vWo = new double[EmbedSize, HeadSize];
     }
 
     private double[,] InitializeMatrix (int rows, int cols) {
@@ -331,6 +369,13 @@ public class FeedForward
 
     public double[,] dW1, dW2;
     public double[] dB1, dB2;
+
+    // For Adam optimizer
+    public double[,] mW1, vW1;
+    public double[,] mW2, vW2;
+    public double[] mB1, vB1;
+    public double[] mB2, vB2;
+
     private Random rand;
 
     public FeedForward (int embedSize, int hiddenSize, Random random) {
@@ -346,6 +391,15 @@ public class FeedForward
         dB1 = new double[HiddenSize];
         dW2 = new double[EmbedSize, HiddenSize];
         dB2 = new double[EmbedSize];
+
+        mW1 = new double[HiddenSize, EmbedSize];
+        vW1 = new double[HiddenSize, EmbedSize];
+        mW2 = new double[EmbedSize, HiddenSize];
+        vW2 = new double[EmbedSize, HiddenSize];
+        mB1 = new double[HiddenSize];
+        vB1 = new double[HiddenSize];
+        mB2 = new double[EmbedSize];
+        vB2 = new double[EmbedSize];
     }
 
     private double[,] InitializeMatrix (int rows, int cols) {
@@ -573,7 +627,13 @@ public class LlamaForCausalLM
     public List<TransformerBlock> TransformerBlocks;
     public LayerNorm FinalLayerNorm;
     public double[,] OutputProjection;
+
     public double[,] dOutputProjection;
+
+    // For Adam optimizer
+    public double[,] mOutputProjection;
+    public double[,] vOutputProjection;
+
     public int VocabSize, EmbedSize, HiddenSize, HeadSize, NumLayers;
 
     private List<double[]> embeddings;
@@ -598,6 +658,8 @@ public class LlamaForCausalLM
         FinalLayerNorm = new LayerNorm (embedSize);
         OutputProjection = InitializeMatrix (VocabSize, EmbedSize);
         dOutputProjection = new double[VocabSize, EmbedSize];
+        mOutputProjection = new double[VocabSize, EmbedSize];
+        vOutputProjection = new double[VocabSize, EmbedSize];
     }
 
     private double[,] InitializeMatrix (int rows, int cols) {
@@ -711,12 +773,150 @@ public static class LossFunctions
     }
 }
 
-// Optimizer updated to handle all parameters
+// Adam Optimizer
+public class AdamOptimizer
+{
+    public double LearningRate;
+    public double Beta1;
+    public double Beta2;
+    public double Epsilon;
+    private int timestep;
+
+    public AdamOptimizer (double learningRate, double beta1 = 0.9, double beta2 = 0.999, double epsilon = 1e-8) {
+        LearningRate = learningRate;
+        Beta1 = beta1;
+        Beta2 = beta2;
+        Epsilon = epsilon;
+        timestep = 0;
+    }
+
+    public void Step (LlamaForCausalLM model) {
+        timestep++;
+
+        // Update TokenEmbedding weights
+        UpdateParameters (model.TokenEmbedding.Weights, model.TokenEmbedding.Gradients,
+            model.TokenEmbedding.mWeights, model.TokenEmbedding.vWeights);
+
+        ZeroGradients (model.TokenEmbedding.Gradients);
+
+        // Update OutputProjection
+        UpdateParameters (model.OutputProjection, model.dOutputProjection,
+            model.mOutputProjection, model.vOutputProjection);
+
+        ZeroGradients (model.dOutputProjection);
+
+        // Update LayerNorm parameters
+        UpdateLayerNorm (model.FinalLayerNorm);
+
+        // Update TransformerBlocks
+        foreach (var block in model.TransformerBlocks) {
+            UpdateLayerNorm (block.Norm1);
+            UpdateLayerNorm (block.Norm2);
+
+            // Update SelfAttention parameters
+            UpdateParameters (block.SelfAttention.Wq, block.SelfAttention.dWq,
+                block.SelfAttention.mWq, block.SelfAttention.vWq);
+            UpdateParameters (block.SelfAttention.Wk, block.SelfAttention.dWk,
+                block.SelfAttention.mWk, block.SelfAttention.vWk);
+            UpdateParameters (block.SelfAttention.Wv, block.SelfAttention.dWv,
+                block.SelfAttention.mWv, block.SelfAttention.vWv);
+            UpdateParameters (block.SelfAttention.Wo, block.SelfAttention.dWo,
+                block.SelfAttention.mWo, block.SelfAttention.vWo);
+
+            ZeroGradients (block.SelfAttention.dWq);
+            ZeroGradients (block.SelfAttention.dWk);
+            ZeroGradients (block.SelfAttention.dWv);
+            ZeroGradients (block.SelfAttention.dWo);
+
+            // Update FeedForward parameters
+            UpdateFeedForward (block.FeedForward);
+        }
+    }
+
+    private void UpdateLayerNorm (LayerNorm layerNorm) {
+        for (int i = 0; i < layerNorm.Size; i++) {
+            // Update Gamma
+            layerNorm.mGamma[i] = Beta1 * layerNorm.mGamma[i] + (1 - Beta1) * layerNorm.dGamma[i];
+            layerNorm.vGamma[i] = Beta2 * layerNorm.vGamma[i] + (1 - Beta2) * layerNorm.dGamma[i] * layerNorm.dGamma[i];
+
+            double mHatGamma = layerNorm.mGamma[i] / (1 - Math.Pow (Beta1, timestep));
+            double vHatGamma = layerNorm.vGamma[i] / (1 - Math.Pow (Beta2, timestep));
+
+            layerNorm.Gamma[i] -= LearningRate * mHatGamma / (Math.Sqrt (vHatGamma) + Epsilon);
+
+            // Update Beta
+            layerNorm.mBeta[i] = Beta1 * layerNorm.mBeta[i] + (1 - Beta1) * layerNorm.dBeta[i];
+            layerNorm.vBeta[i] = Beta2 * layerNorm.vBeta[i] + (1 - Beta2) * layerNorm.dBeta[i] * layerNorm.dBeta[i];
+
+            double mHatBeta = layerNorm.mBeta[i] / (1 - Math.Pow (Beta1, timestep));
+            double vHatBeta = layerNorm.vBeta[i] / (1 - Math.Pow (Beta2, timestep));
+
+            layerNorm.Beta[i] -= LearningRate * mHatBeta / (Math.Sqrt (vHatBeta) + Epsilon);
+
+            layerNorm.dGamma[i] = 0;
+            layerNorm.dBeta[i] = 0;
+        }
+    }
+
+    private void UpdateFeedForward (FeedForward feedForward) {
+        // Update W1 and B1
+        UpdateParameters (feedForward.W1, feedForward.dW1, feedForward.mW1, feedForward.vW1);
+        UpdateParameters (feedForward.W2, feedForward.dW2, feedForward.mW2, feedForward.vW2);
+        UpdateParameters (feedForward.B1, feedForward.dB1, feedForward.mB1, feedForward.vB1);
+        UpdateParameters (feedForward.B2, feedForward.dB2, feedForward.mB2, feedForward.vB2);
+
+        ZeroGradients (feedForward.dW1);
+        ZeroGradients (feedForward.dW2);
+        ZeroGradients (feedForward.dB1);
+        ZeroGradients (feedForward.dB2);
+    }
+
+    private void UpdateParameters (double[,] weights, double[,] gradients, double[,] m, double[,] v) {
+        int rows = weights.GetLength (0);
+        int cols = weights.GetLength (1);
+        for (int i = 0; i < rows; i++)
+        for (int j = 0; j < cols; j++) {
+            m[i, j] = Beta1 * m[i, j] + (1 - Beta1) * gradients[i, j];
+            v[i, j] = Beta2 * v[i, j] + (1 - Beta2) * gradients[i, j] * gradients[i, j];
+
+            double mHat = m[i, j] / (1 - Math.Pow (Beta1, timestep));
+            double vHat = v[i, j] / (1 - Math.Pow (Beta2, timestep));
+
+            weights[i, j] -= LearningRate * mHat / (Math.Sqrt (vHat) + Epsilon);
+        }
+    }
+
+    private void UpdateParameters (double[] weights, double[] gradients, double[] m, double[] v) {
+        int length = weights.Length;
+        for (int i = 0; i < length; i++) {
+            m[i] = Beta1 * m[i] + (1 - Beta1) * gradients[i];
+            v[i] = Beta2 * v[i] + (1 - Beta2) * gradients[i] * gradients[i];
+
+            double mHat = m[i] / (1 - Math.Pow (Beta1, timestep));
+            double vHat = v[i] / (1 - Math.Pow (Beta2, timestep));
+
+            weights[i] -= LearningRate * mHat / (Math.Sqrt (vHat) + Epsilon);
+        }
+    }
+
+    private void ZeroGradients (double[,] gradients) {
+        int rows = gradients.GetLength (0);
+        int cols = gradients.GetLength (1);
+        for (int i = 0; i < rows; i++)
+        for (int j = 0; j < cols; j++)
+            gradients[i, j] = 0;
+    }
+
+    private void ZeroGradients (double[] gradients) {
+        for (int i = 0; i < gradients.Length; i++)
+            gradients[i] = 0;
+    }
+}
 
 // Training Code with backward pass and parameter updates
 public class Trainer
 {
-    public static void train (LlamaForCausalLM model, SGDOptimizer optimizer, Func<(int[], int[])> data, int epochs, int epochSize, Action callback) {
+    public static void train (LlamaForCausalLM model, AdamOptimizer optimizer, Func<(int[], int[])> data, int epochs, int epochSize, Action callback) {
         for (int epoch = 0; epoch < epochs; epoch++) {
             double totalLoss = 0;
             for (int i = 0; i < epochSize; i++) {
