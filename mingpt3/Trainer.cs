@@ -4,7 +4,7 @@ namespace mingpt3;
 
 static class Trainer
 {
-    public static void train (Model model, Optimizer optimizer, int batchSize, Func<(int[] tokens, int next)> data, char[]vocabulary) {
+    public static void train (Model model, Optimizer optimizer, int batchSize, Func<(int[] tokens, int next)> data, char[] vocabulary) {
         for (int epoch = 0; epoch < 1000; epoch++) {
             var documents = Enumerable
                 .Range (0, batchSize)
@@ -26,26 +26,22 @@ static class Trainer
 
             optimizer.Step (model);
 
-            var a = predict (model, vocabulary, "The ", model.MaxSeqLen, topK: 10);
-            var b = predict (model, vocabulary, "The ", model.MaxSeqLen, topK: 0);
-            var c = predict (model, vocabulary, "The ", model.MaxSeqLen, topK: 0, argmax: true);
+
+            double[] logits (Matrix x) {
+                var logits = new double[x.Data.GetLength (1)];
+                var seqLength = x.Data.GetLength (0);
+
+                for (var i = 0; i < logits.Length; i++) {
+                    logits[i] = x.Data[seqLength - 1, i];
+                }
+
+                return logits;
+            }
+
+            var a = TextGeneration.predict (_ => logits (model.Forward (_)), vocabulary, "The ", model.MaxSeqLen, topK: 10);
+            var b = TextGeneration.predict (_ => logits (model.Forward (_)), vocabulary, "The ", model.MaxSeqLen, topK: 0);
+            var c = TextGeneration.predict (_ => logits (model.Forward (_)), vocabulary, "The ", model.MaxSeqLen, topK: 0, argmax: true);
             Console.WriteLine ($"Epoch {epoch}, Loss: {totalLoss:F4}, {a}, {b}, {c}");
         }
-    }
-
-    static string predict (Model model, char[] vocabulary, string prompt, int generatedLength, double temperature = 1.0, int topK = 10,
-        bool argmax = false) {
-        var generatedTokens = new List<int> (DataLoader.encode (prompt, vocabulary));
-
-        for (int i = 0; i < generatedLength - prompt.Length; i++) {
-            int nextTokenId = model.PredictNextToken (
-                generatedTokens.ToArray (),
-                temperature,
-                topK,
-                argmax);
-            generatedTokens.Add (nextTokenId);
-        }
-
-        return DataLoader.decode (generatedTokens.ToArray (), vocabulary);
     }
 }

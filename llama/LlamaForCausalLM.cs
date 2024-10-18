@@ -752,7 +752,7 @@ public class SGDOptimizer
 // Training Code with backward pass and parameter updates
 public class Trainer
 {
-    public static void train (LlamaForCausalLM model, SGDOptimizer optimizer, Func<(int[], int)> data, int epochs, int epochSize) {
+    public static void train (LlamaForCausalLM model, SGDOptimizer optimizer, Func<(int[], int)> data, int epochs, int epochSize, Action callback) {
         for (int epoch = 0; epoch < epochs; epoch++) {
             double totalLoss = 0;
             for (int i = 0; i < epochSize; i++) {
@@ -774,6 +774,8 @@ public class Trainer
             }
 
             Console.WriteLine ($"Epoch {epoch + 1}/{epochs}, Loss: {totalLoss / epochSize}");
+
+            callback?.Invoke ();
         }
     }
 }

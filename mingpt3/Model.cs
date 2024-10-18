@@ -1,5 +1,3 @@
-using transformers.utils;
-
 namespace mingpt3;
 
 /**
@@ -65,62 +63,5 @@ public class Model
         for (int i = 0; i < length; i++)
             positions[i] = i;
         return positions;
-    }
-
-    private double[] Softmax (double[] logits) {
-        double maxLogit = double.NegativeInfinity;
-        for (int i = 0; i < logits.Length; i++)
-            if (logits[i] > maxLogit)
-                maxLogit = logits[i];
-
-        double sumExp = 0.0;
-        var expLogits = new double[logits.Length];
-        for (int i = 0; i < logits.Length; i++) {
-            expLogits[i] = Math.Exp (logits[i] - maxLogit);
-            sumExp += expLogits[i];
-        }
-
-        var probabilities = new double[logits.Length];
-        for (int i = 0; i < logits.Length; i++)
-            probabilities[i] = expLogits[i] / sumExp;
-
-        return probabilities;
-    }
-
-    public int PredictNextToken (int[] inputIds, double temperature = 1.0, int topK = 10, bool argmax = false) {
-        var logits = Forward (inputIds);
-        var lastLogits = new double[VocabSize];
-        for (int i = 0; i < VocabSize; i++)
-            lastLogits[i] = logits.Data[inputIds.Length - 1, i] / temperature;
-
-        if (topK > 0) {
-            lastLogits = TopKFilter (lastLogits, topK);
-        }
-
-        // Apply softmax to convert logits to probabilities
-        var probabilities = Softmax (lastLogits);
-
-        // Sample the next token based on probabilities
-        return argmax
-            ? sampling.ArgMax (probabilities)
-            : sampling.SampleFromDistribution (probabilities);
-    }
-
-    private double[] TopKFilter (double[] logits, int k) {
-        var filteredLogits = new double[logits.Length];
-        Array.Copy (logits, filteredLogits, logits.Length);
-
-        var indices = new int[logits.Length];
-        for (int i = 0; i < logits.Length; i++)
-            indices[i] = i;
-
-        Array.Sort (logits, indices);
-        Array.Reverse (logits);
-        Array.Reverse (indices);
-
-        for (int i = k; i < logits.Length; i++)
-            filteredLogits[indices[i]] = double.NegativeInfinity;
-
-        return filteredLogits;
     }
 }

@@ -19,13 +19,22 @@ public class LlamaTest
             hiddenSize,
             hiddenSize / numHeads,
             numLayers: 4);
-        var optimizer = new SGDOptimizer(learningRate: 0.0005);
+        var optimizer = new SGDOptimizer (learningRate: 0.0005);
 
         Trainer.train (
             model,
             optimizer,
             data,
             1000,
-            batchSize);
+            batchSize,
+            callback: () => {
+                var a = TextGeneration.predict (_ => model.Forward (_), vocabulary, "The ", maxSeqLen, topK: 10);
+                var b = TextGeneration.predict (_ => model.Forward (_), vocabulary, "The ", maxSeqLen, topK: 0);
+                var c = TextGeneration.predict (_ => model.Forward (_), vocabulary, "The ", maxSeqLen, topK: 0, argmax: true);
+
+                Console.WriteLine (a);
+                Console.WriteLine (b);
+                Console.WriteLine (c);
+            });
     }
 }
