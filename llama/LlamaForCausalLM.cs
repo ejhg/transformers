@@ -54,6 +54,24 @@ public static class MathOps
 
         return dScores;
     }
+
+    // Extension method to get a row from a 2D array
+    public static double[] GetRow (double[,] matrix, int row) {
+        int cols = matrix.GetLength (1);
+        double[] result = new double[cols];
+        for (int i = 0; i < cols; i++)
+            result[i] = matrix[row, i];
+        return result;
+    }
+
+    public static double[,] InitializeMatrix (Random rand, int rows, int cols) {
+        double[,] matrix = new double[rows, cols];
+        double limit = Math.Sqrt (6.0 / (rows + cols)); // Xavier Initialization
+        for (int i = 0; i < rows; i++)
+        for (int j = 0; j < cols; j++)
+            matrix[i, j] = rand.NextDouble () * 2 * limit - limit;
+        return matrix;
+    }
 }
 
 // Embedding layer with backward pass
@@ -194,10 +212,10 @@ public class SelfAttention
         rand = random;
         EmbedSize = embedSize;
         HeadSize = headSize;
-        Wq = InitializeMatrix (HeadSize, EmbedSize);
-        Wk = InitializeMatrix (HeadSize, EmbedSize);
-        Wv = InitializeMatrix (HeadSize, EmbedSize);
-        Wo = InitializeMatrix (EmbedSize, HeadSize);
+        Wq = MathOps.InitializeMatrix (rand, HeadSize, EmbedSize);
+        Wk = MathOps.InitializeMatrix (rand,HeadSize, EmbedSize);
+        Wv = MathOps.InitializeMatrix (rand,HeadSize, EmbedSize);
+        Wo = MathOps.InitializeMatrix (rand,EmbedSize, HeadSize);
 
         dWq = new double[HeadSize, EmbedSize];
         dWk = new double[HeadSize, EmbedSize];
@@ -212,15 +230,6 @@ public class SelfAttention
         vWv = new double[HeadSize, EmbedSize];
         mWo = new double[EmbedSize, HeadSize];
         vWo = new double[EmbedSize, HeadSize];
-    }
-
-    private double[,] InitializeMatrix (int rows, int cols) {
-        double[,] matrix = new double[rows, cols];
-        double limit = Math.Sqrt (6.0 / (rows + cols)); // Xavier Initialization
-        for (int i = 0; i < rows; i++)
-        for (int j = 0; j < cols; j++)
-            matrix[i, j] = rand.NextDouble () * 2 * limit - limit;
-        return matrix;
     }
 
     public (List<double[]> outputs, SelfAttentionCache cache) Forward (List<double[]> inputs, int startPosition) {
@@ -440,9 +449,9 @@ public class FeedForward
         rand = random;
         EmbedSize = embedSize;
         HiddenSize = hiddenSize;
-        W1 = InitializeMatrix (HiddenSize, EmbedSize);
+        W1 = MathOps.InitializeMatrix (rand,HiddenSize, EmbedSize);
         B1 = new double[HiddenSize];
-        W2 = InitializeMatrix (EmbedSize, HiddenSize);
+        W2 = MathOps.InitializeMatrix (rand,EmbedSize, HiddenSize);
         B2 = new double[EmbedSize];
 
         dW1 = new double[HiddenSize, EmbedSize];
@@ -458,15 +467,6 @@ public class FeedForward
         vB1 = new double[HiddenSize];
         mB2 = new double[EmbedSize];
         vB2 = new double[EmbedSize];
-    }
-
-    private double[,] InitializeMatrix (int rows, int cols) {
-        double[,] matrix = new double[rows, cols];
-        double limit = Math.Sqrt (6.0 / (rows + cols)); // Xavier Initialization
-        for (int i = 0; i < rows; i++)
-        for (int j = 0; j < cols; j++)
-            matrix[i, j] = rand.NextDouble () * 2 * limit - limit;
-        return matrix;
     }
 
     public (double[] output, FeedForwardCache cache) Forward (double[] x) {
@@ -558,7 +558,6 @@ public class TransformerBlock
         int seqLen = inputs.Count;
 
         var cache = new TransformerBlockCache {
-            inputs = inputs,
             normedInputs = new List<double[]> (),
             norm1Caches = new List<LayerNormCache> (),
             saOutputs = new List<double[]> (),
@@ -661,7 +660,6 @@ public class TransformerBlock
 
 public class TransformerBlockCache
 {
-    public List<double[]> inputs;
     public List<double[]> normedInputs;
     public List<LayerNormCache> norm1Caches;
     public List<double[]> saOutputs;
@@ -710,19 +708,10 @@ public class LlamaForCausalLM
         for (int i = 0; i < numLayers; i++)
             TransformerBlocks.Add (new TransformerBlock (embedSize, hiddenSize, headSize, rand));
         FinalLayerNorm = new LayerNorm (embedSize);
-        OutputProjection = InitializeMatrix (VocabSize, EmbedSize);
+        OutputProjection = MathOps.InitializeMatrix (rand,VocabSize, EmbedSize);
         dOutputProjection = new double[VocabSize, EmbedSize];
         mOutputProjection = new double[VocabSize, EmbedSize];
         vOutputProjection = new double[VocabSize, EmbedSize];
-    }
-
-    private double[,] InitializeMatrix (int rows, int cols) {
-        double[,] matrix = new double[rows, cols];
-        double limit = Math.Sqrt (6.0 / (rows + cols)); // Xavier Initialization
-        for (int i = 0; i < rows; i++)
-        for (int j = 0; j < cols; j++)
-            matrix[i, j] = rand.NextDouble () * 2 * limit - limit;
-        return matrix;
     }
 
     public List<double[]> Forward (int[] inputTokens) {
@@ -751,7 +740,7 @@ public class LlamaForCausalLM
         foreach (var finalEmbedding in finalEmbeddings) {
             double[] logits = new double[VocabSize];
             for (int i = 0; i < VocabSize; i++)
-                logits[i] = MathOps.Dot (OutputProjection.GetRow (i), finalEmbedding);
+                logits[i] = MathOps.Dot (MathOps.GetRow (OutputProjection, i), finalEmbedding);
             logitsList.Add (logits);
         }
 
@@ -801,18 +790,6 @@ public class LlamaForCausalLM
         for (int i = 0; i < inputTokens.Length; i++) {
             TokenEmbedding.Backward (inputTokens[i], dEmbeddings[i]);
         }
-    }
-}
-
-// Extension method to get a row from a 2D array
-public static class Extensions
-{
-    public static double[] GetRow (this double[,] matrix, int row) {
-        int cols = matrix.GetLength (1);
-        double[] result = new double[cols];
-        for (int i = 0; i < cols; i++)
-            result[i] = matrix[row, i];
-        return result;
     }
 }
 
@@ -1023,7 +1000,6 @@ public class AdamOptimizer
     }
 
     private void ZeroGradients (double[] gradients) {
-        for (int i = 0; i < gradients.Length; i++)
-            gradients[i] = 0;
+        Array.Fill (gradients, 0);
     }
 }
