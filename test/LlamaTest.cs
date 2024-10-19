@@ -14,11 +14,12 @@ public class LlamaTest
         var data = DataLoader.LoadData (maxSeqLen, out var vocabSize, out var vocabulary);
 
         var model = new LlamaForCausalLM (
-            vocabSize,
-            embeddingSize,
-            hiddenSize,
-            hiddenSize / numHeads,
+            vocabSize: vocabSize,
+            embedSize: embeddingSize,
+            hiddenSize: hiddenSize,
+            numHeads: numHeads,
             numLayers: 4,
+            numQueryGroups: 2,
             new Random ());
         var optimizer = new AdamOptimizer (learningRate: 0.001);
 
