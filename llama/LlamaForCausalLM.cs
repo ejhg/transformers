@@ -149,9 +149,10 @@ public class RMSNorm
             dot += x[i] * gradOutput[i] * Gamma[i];
         }
 
-        double rms_cubed = rms * rms * rms;
+        // Corrected denominator from rms_cubed to rms_squared
+        double rms_squared = rms * rms;
         for (int i = 0; i < Size; i++) {
-            dx[i] = Gamma[i] / rms * (gradOutput[i] - x[i] * dot / rms_cubed);
+            dx[i] = Gamma[i] / rms * (gradOutput[i] - x[i] * dot / rms_squared);
         }
 
         return dx;
