@@ -145,7 +145,6 @@ public class RMSNorm
             dot += x[i] * gradOutput[i] * Gamma[i];
         }
 
-        // Corrected denominator from rms_cubed to rms_squared
         double rms_squared = rms * rms;
         for (int i = 0; i < Size; i++) {
             dx[i] = Gamma[i] / rms * (gradOutput[i] - x[i] * dot / rms_squared);
@@ -178,12 +177,15 @@ public class SelfAttention
     public double[,] mWo, vWo;
 
     public int EmbedSize, NumHeads, HeadDim, NumQueryGroups;
+    public int HeadsPerGroup;
 
     public SelfAttention (int embedSize, int numHeads, int numQueryGroups, Random random) {
         EmbedSize = embedSize;
         NumHeads = numHeads;
         NumQueryGroups = numQueryGroups;
         HeadDim = embedSize / numHeads;
+
+        HeadsPerGroup = NumHeads / NumQueryGroups;
 
         // Initialize Wq for each query group
         Wq = new double[NumQueryGroups][,];
@@ -192,10 +194,11 @@ public class SelfAttention
         vWq = new double[NumQueryGroups][,];
 
         for (int g = 0; g < NumQueryGroups; g++) {
-            Wq[g] = MathOps.InitializeMatrix (random, HeadDim, EmbedSize);
-            dWq[g] = new double[HeadDim, EmbedSize];
-            mWq[g] = new double[HeadDim, EmbedSize];
-            vWq[g] = new double[HeadDim, EmbedSize];
+            int WqRows = HeadDim * HeadsPerGroup;
+            Wq[g] = MathOps.InitializeMatrix (random, WqRows, EmbedSize);
+            dWq[g] = new double[WqRows, EmbedSize];
+            mWq[g] = new double[WqRows, EmbedSize];
+            vWq[g] = new double[WqRows, EmbedSize];
         }
 
         // Initialize Wk and Wv for each head
@@ -227,7 +230,6 @@ public class SelfAttention
 
     public (List<double[]> outputs, SelfAttentionCache cache) Forward (List<double[]> inputs, int startPosition) {
         int seqLen = inputs.Count;
-        int headsPerGroup = NumHeads / NumQueryGroups;
 
         var cache = new SelfAttentionCache {
             Inputs = inputs,
@@ -258,10 +260,13 @@ public class SelfAttention
                 double[] qGroup = MathOps.MatrixVectorProduct (Wq[g], x);
                 qGroup = ApplyRoPE (qGroup, t + startPosition);
 
-                // Assign qGroup to heads in this group
-                for (int h = 0; h < headsPerGroup; h++) {
-                    int headIndex = g * headsPerGroup + h;
-                    cache.Qs[headIndex].Add (qGroup); // Heads share qGroup
+                // Split qGroup into headsPerGroup query vectors
+                for (int h = 0; h < HeadsPerGroup; h++) {
+                    int headIndex = g * HeadsPerGroup + h;
+                    int offset = h * HeadDim;
+                    double[] qHead = new double[HeadDim];
+                    Array.Copy (qGroup, offset, qHead, 0, HeadDim);
+                    cache.Qs[headIndex].Add (qHead);
                 }
             }
 
@@ -315,7 +320,6 @@ public class SelfAttention
 
     public List<double[]> Backward (List<double[]> gradOutputs, SelfAttentionCache cache) {
         int seqLen = cache.Inputs.Count;
-        int headsPerGroup = NumHeads / NumQueryGroups;
         List<double[]> dInputs = new List<double[]> (seqLen);
         for (int i = 0; i < seqLen; i++)
             dInputs.Add (new double[EmbedSize]);
@@ -407,37 +411,43 @@ public class SelfAttention
 
         // Group-level accumulation for Wq and dInputs
         for (int g = 0; g < NumQueryGroups; g++) {
-            int startHead = g * headsPerGroup;
-            int endHead = startHead + headsPerGroup;
+            int startHead = g * HeadsPerGroup;
+            int endHead = startHead + HeadsPerGroup;
 
-            // Initialize dQs_group[t]
-            double[][] dQs_group = new double[seqLen][];
+            // Initialize dQGroup for the group
+            double[][] dQGroup = new double[seqLen][];
             for (int t = 0; t < seqLen; t++) {
-                dQs_group[t] = new double[HeadDim];
+                dQGroup[t] = new double[HeadDim * HeadsPerGroup];
             }
 
-            // Sum dQs over all heads in group g
+            // Concatenate perHead_dQs into dQGroup
             for (int h = startHead; h < endHead; h++) {
                 for (int t = 0; t < seqLen; t++) {
-                    for (int i = 0; i < HeadDim; i++) {
-                        dQs_group[t][i] += perHead_dQs[h][t][i];
-                    }
+                    int offset = (h - startHead) * HeadDim;
+                    Array.Copy (perHead_dQs[h][t], 0, dQGroup[t], offset, HeadDim);
                 }
             }
 
-            // Update Wq and dInputs using grouped gradients
+            // Update Wq and dInputs using dQGroup
             for (int t = 0; t < seqLen; t++) {
                 double[] x = cache.Inputs[t];
 
                 // Accumulate gradients for Wq
-                for (int i = 0; i < HeadDim; i++)
-                for (int j = 0; j < EmbedSize; j++)
-                    dWq[g][i, j] += dQs_group[t][i] * x[j];
+                for (int i = 0; i < HeadDim * HeadsPerGroup; i++) {
+                    for (int j = 0; j < EmbedSize; j++) {
+                        dWq[g][i, j] += dQGroup[t][i] * x[j];
+                    }
+                }
 
                 // Update dInputs
-                for (int i = 0; i < HeadDim; i++)
-                for (int j = 0; j < EmbedSize; j++)
-                    dInputs[t][j] += Wq[g][i, j] * dQs_group[t][i];
+                for (int j = 0; j < EmbedSize; j++) {
+                    double sum = 0.0;
+                    for (int i = 0; i < HeadDim * HeadsPerGroup; i++) {
+                        sum += Wq[g][i, j] * dQGroup[t][i];
+                    }
+
+                    dInputs[t][j] += sum;
+                }
             }
         }
 
@@ -833,7 +843,7 @@ public class LlamaForCausalLM
             finalRMSNormCaches.Add (cache);
         }
 
-        // Compute logits for each time step
+        // Compute logits for each time step using weight tying
         List<double[]> logitsList = new List<double[]> ();
         foreach (var finalEmbedding in finalEmbeddings) {
             double[] logits = new double[VocabSize];
