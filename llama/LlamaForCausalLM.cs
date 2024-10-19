@@ -89,15 +89,10 @@ public class Embedding
 
     public Embedding (int vocabSize, int embedSize, Random random) {
         rand = random;
-        Weights = new double[vocabSize, embedSize];
+        Weights = MathOps.InitializeMatrix (rand, vocabSize, embedSize);
         Gradients = new double[vocabSize, embedSize];
         mWeights = new double[vocabSize, embedSize];
         vWeights = new double[vocabSize, embedSize];
-
-        double limit = Math.Sqrt (6.0 / (vocabSize + embedSize)); // Xavier Initialization
-        for (int i = 0; i < vocabSize; i++)
-        for (int j = 0; j < embedSize; j++)
-            Weights[i, j] = rand.NextDouble () * 2 * limit - limit;
     }
 
     public double[] Forward (int token) {
