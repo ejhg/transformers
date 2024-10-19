@@ -26,9 +26,10 @@ public static class MathOps
         int cols = matrix.GetLength (1);
         double[] result = new double[rows];
         for (int i = 0; i < rows; i++) {
-            result[i] = 0;
+            var accum = 0.0;
             for (int j = 0; j < cols; j++)
-                result[i] += matrix[i, j] * vector[j];
+                accum += matrix[i, j] * vector[j];
+            result[i] = accum;
         }
 
         return result;
@@ -41,7 +42,6 @@ public static class MathOps
         return expLogits.Select (x => x / sumExp).ToArray ();
     }
 
-    // Extension method to get a row from a 2D array
     public static double[] GetRow (double[,] matrix, int row) {
         int cols = matrix.GetLength (1);
         double[] result = new double[cols];
@@ -58,34 +58,35 @@ public static class MathOps
             matrix[i, j] = rand.NextDouble () * 2 * limit - limit;
         return matrix;
     }
+
+    public static void ZeroGradients (double[,] gradients) {
+        Array.Clear (gradients, 0, gradients.Length);
+    }
+
+    public static void ZeroGradients (double[] gradients) {
+        Array.Clear (gradients, 0, gradients.Length);
+    }
 }
 
 // Embedding layer with backward pass and weight tying
 public class Embedding
 {
     public double[,] Weights;
-
     public double[,] Gradients;
 
     // For Adam optimizer
     public double[,] mWeights;
     public double[,] vWeights;
 
-    private Random rand;
-
     public Embedding (int vocabSize, int embedSize, Random random) {
-        rand = random;
-        Weights = MathOps.InitializeMatrix (rand, vocabSize, embedSize);
+        Weights = MathOps.InitializeMatrix (random, vocabSize, embedSize);
         Gradients = new double[vocabSize, embedSize];
         mWeights = new double[vocabSize, embedSize];
         vWeights = new double[vocabSize, embedSize];
     }
 
     public double[] Forward (int token) {
-        double[] embedding = new double[Weights.GetLength (1)];
-        for (int i = 0; i < Weights.GetLength (1); i++)
-            embedding[i] = Weights[token, i];
-        return embedding;
+        return MathOps.GetRow (Weights, token);
     }
 
     public void Backward (int token, double[] grad) {
@@ -98,13 +99,10 @@ public class Embedding
 public class RMSNorm
 {
     public double[] Gamma;
-    public int Size;
-
     public double[] dGamma;
-
-    // For Adam optimizer
     public double[] mGamma;
     public double[] vGamma;
+    public int Size;
 
     public RMSNorm (int size) {
         Size = size;
@@ -112,9 +110,7 @@ public class RMSNorm
         dGamma = new double[size];
         mGamma = new double[size];
         vGamma = new double[size];
-        for (int i = 0; i < size; i++) {
-            Gamma[i] = 1.0;
-        }
+        Array.Fill (Gamma, 1.0);
     }
 
     public (double[] output, RMSNormCache cache) Forward (double[] x) {
@@ -165,19 +161,17 @@ public class RMSNormCache
     public double rms;
 }
 
-// Self-Attention mechanism with RoPE and backward pass (Grouped Query Attention)
+// Self-Attention mechanism with RoPE and backward pass
 public class SelfAttention
 {
-    public double[][,] Wq; // Wq[g][HeadDim, EmbedSize]
-    public double[][,] Wk, Wv; // Each is [HeadDim, EmbedSize], total NumHeads elements
-    public double[,] Wo; // [EmbedSize, EmbedSize]
+    public double[][,] Wq;
+    public double[][,] Wk, Wv;
+    public double[,] Wo;
 
-    // Gradients
     public double[][,] dWq;
     public double[][,] dWk, dWv;
     public double[,] dWo;
 
-    // For Adam optimizer
     public double[][,] mWq, vWq;
     public double[][,] mWk, vWk;
     public double[][,] mWv, vWv;
@@ -185,10 +179,7 @@ public class SelfAttention
 
     public int EmbedSize, NumHeads, HeadDim, NumQueryGroups;
 
-    private Random rand;
-
     public SelfAttention (int embedSize, int numHeads, int numQueryGroups, Random random) {
-        rand = random;
         EmbedSize = embedSize;
         NumHeads = numHeads;
         NumQueryGroups = numQueryGroups;
@@ -201,7 +192,7 @@ public class SelfAttention
         vWq = new double[NumQueryGroups][,];
 
         for (int g = 0; g < NumQueryGroups; g++) {
-            Wq[g] = MathOps.InitializeMatrix (rand, HeadDim, EmbedSize);
+            Wq[g] = MathOps.InitializeMatrix (random, HeadDim, EmbedSize);
             dWq[g] = new double[HeadDim, EmbedSize];
             mWq[g] = new double[HeadDim, EmbedSize];
             vWq[g] = new double[HeadDim, EmbedSize];
@@ -218,8 +209,8 @@ public class SelfAttention
         vWv = new double[NumHeads][,];
 
         for (int h = 0; h < NumHeads; h++) {
-            Wk[h] = MathOps.InitializeMatrix (rand, HeadDim, EmbedSize);
-            Wv[h] = MathOps.InitializeMatrix (rand, HeadDim, EmbedSize);
+            Wk[h] = MathOps.InitializeMatrix (random, HeadDim, EmbedSize);
+            Wv[h] = MathOps.InitializeMatrix (random, HeadDim, EmbedSize);
             dWk[h] = new double[HeadDim, EmbedSize];
             dWv[h] = new double[HeadDim, EmbedSize];
             mWk[h] = new double[HeadDim, EmbedSize];
@@ -228,7 +219,7 @@ public class SelfAttention
             vWv[h] = new double[HeadDim, EmbedSize];
         }
 
-        Wo = MathOps.InitializeMatrix (rand, EmbedSize, EmbedSize);
+        Wo = MathOps.InitializeMatrix (random, EmbedSize, EmbedSize);
         dWo = new double[EmbedSize, EmbedSize];
         mWo = new double[EmbedSize, EmbedSize];
         vWo = new double[EmbedSize, EmbedSize];
@@ -240,11 +231,11 @@ public class SelfAttention
 
         var cache = new SelfAttentionCache {
             Inputs = inputs,
-            Qs = new List<List<double[]>> (),
-            Ks = new List<List<double[]>> (),
-            Vs = new List<List<double[]>> (),
+            Qs = new List<List<double[]>> (NumHeads),
+            Ks = new List<List<double[]>> (NumHeads),
+            Vs = new List<List<double[]>> (NumHeads),
             Zs = new List<double[]> (),
-            Softmaxes = new List<List<double[]>> (),
+            Softmaxes = new List<List<double[]>> (NumHeads),
             StartPosition = startPosition
         };
 
@@ -276,10 +267,8 @@ public class SelfAttention
 
             // Compute K and V for each head
             for (int h = 0; h < NumHeads; h++) {
-                double[] k = MathOps.MatrixVectorProduct (Wk[h], x);
+                double[] k = ApplyRoPE (MathOps.MatrixVectorProduct (Wk[h], x), t + startPosition);
                 double[] v = MathOps.MatrixVectorProduct (Wv[h], x);
-
-                k = ApplyRoPE (k, t + startPosition);
 
                 cache.Ks[h].Add (k);
                 cache.Vs[h].Add (v);
@@ -327,15 +316,14 @@ public class SelfAttention
     public List<double[]> Backward (List<double[]> gradOutputs, SelfAttentionCache cache) {
         int seqLen = cache.Inputs.Count;
         int headsPerGroup = NumHeads / NumQueryGroups;
-        List<double[]> dInputs = new List<double[]> ();
+        List<double[]> dInputs = new List<double[]> (seqLen);
         for (int i = 0; i < seqLen; i++)
             dInputs.Add (new double[EmbedSize]);
 
         double[,] dWo = new double[EmbedSize, EmbedSize];
         double[][] dConcatHeads = new double[seqLen][];
-        for (int t = 0; t < seqLen; t++) {
+        for (int t = 0; t < seqLen; t++)
             dConcatHeads[t] = new double[EmbedSize];
-        }
 
         // Backprop through output projection
         for (int t = 0; t < seqLen; t++) {
@@ -343,19 +331,15 @@ public class SelfAttention
             double[] concatHeads = cache.Zs[t];
 
             // Gradient w.r.t. concatHeads
-            double[] dConcatHead = new double[EmbedSize];
             for (int i = 0; i < EmbedSize; i++) {
                 for (int j = 0; j < EmbedSize; j++) {
-                    dConcatHead[j] += Wo[i, j] * gradOutput[i];
+                    dConcatHeads[t][j] += Wo[i, j] * gradOutput[i];
                     dWo[i, j] += gradOutput[i] * concatHeads[j];
                 }
             }
-
-            // Store dConcatHead for each position
-            dConcatHeads[t] = dConcatHead;
         }
 
-        // Accumulate gradients for W_o
+        // Accumulate gradients for Wo
         for (int i = 0; i < EmbedSize; i++)
         for (int j = 0; j < EmbedSize; j++)
             this.dWo[i, j] += dWo[i, j];
@@ -446,18 +430,14 @@ public class SelfAttention
                 double[] x = cache.Inputs[t];
 
                 // Accumulate gradients for Wq
-                for (int i = 0; i < HeadDim; i++) {
-                    for (int j = 0; j < EmbedSize; j++) {
-                        dWq[g][i, j] += dQs_group[t][i] * x[j];
-                    }
-                }
+                for (int i = 0; i < HeadDim; i++)
+                for (int j = 0; j < EmbedSize; j++)
+                    dWq[g][i, j] += dQs_group[t][i] * x[j];
 
                 // Update dInputs
-                for (int i = 0; i < HeadDim; i++) {
-                    for (int j = 0; j < EmbedSize; j++) {
-                        dInputs[t][j] += Wq[g][i, j] * dQs_group[t][i];
-                    }
-                }
+                for (int i = 0; i < HeadDim; i++)
+                for (int j = 0; j < EmbedSize; j++)
+                    dInputs[t][j] += Wq[g][i, j] * dQs_group[t][i];
             }
         }
 
@@ -491,8 +471,8 @@ public class SelfAttention
     }
 
     private double[] ApplyRoPE (double[] x, int position) {
-        double[] result = new double[x.Length];
         int halfDim = x.Length / 2;
+        double[] result = new double[x.Length];
         double theta = 10000;
 
         for (int i = 0; i < halfDim; i++) {
@@ -508,8 +488,8 @@ public class SelfAttention
     }
 
     private double[] BackwardRoPE (double[] grad, double[] x, int position) {
-        double[] dx = new double[x.Length];
         int halfDim = x.Length / 2;
+        double[] dx = new double[x.Length];
         double theta = 10000;
 
         for (int i = 0; i < halfDim; i++) {
@@ -547,27 +527,22 @@ public class FeedForward
     public double[] B1; // Shape: (HiddenSize * 2)
     public double[] B2; // Shape: (EmbedSize)
 
-    public int EmbedSize, HiddenSize;
-
     public double[,] dW1, dW2;
     public double[] dB1, dB2;
 
-    // For Adam optimizer
     public double[,] mW1, vW1;
     public double[,] mW2, vW2;
     public double[] mB1, vB1;
     public double[] mB2, vB2;
 
-    private Random rand;
+    public int EmbedSize, HiddenSize;
 
     public FeedForward (int embedSize, int hiddenSize, Random random) {
-        rand = random;
         EmbedSize = embedSize;
         HiddenSize = hiddenSize;
 
-        // Adjusted dimensions for SwiGLU
-        W1 = MathOps.InitializeMatrix (rand, HiddenSize * 2, EmbedSize);
-        W2 = MathOps.InitializeMatrix (rand, EmbedSize, HiddenSize);
+        W1 = MathOps.InitializeMatrix (random, HiddenSize * 2, EmbedSize);
+        W2 = MathOps.InitializeMatrix (random, EmbedSize, HiddenSize);
         B1 = new double[HiddenSize * 2];
         B2 = new double[EmbedSize];
 
@@ -760,12 +735,8 @@ public class TransformerBlock
             double[] dFfAdded = gradOutputs[i];
 
             // Backprop through residual connection
-            double[] dFfOutput = new double[EmbedSize];
-            double[] dSaAdd = new double[EmbedSize];
-            for (int j = 0; j < EmbedSize; j++) {
-                dFfOutput[j] = dFfAdded[j];
-                dSaAdd[j] = dFfAdded[j];
-            }
+            double[] dFfOutput = dFfAdded.ToArray ();
+            double[] dSaAdd = dFfAdded.ToArray ();
 
             // Backprop through feed-forward layer
             double[] dNormedSaAdded = FeedForward.Backward (dFfOutput, cache.ffCaches[i]);
@@ -827,23 +798,18 @@ public class LlamaForCausalLM
     private List<RMSNormCache> finalRMSNormCaches;
     private List<TransformerBlockCache> transformerCaches;
 
-    private Random rand;
-
     public LlamaForCausalLM (int vocabSize, int embedSize, int hiddenSize, int numHeads, int numLayers, int numQueryGroups, Random random) {
-        rand = random;
         VocabSize = vocabSize;
         EmbedSize = embedSize;
         HiddenSize = hiddenSize;
         NumHeads = numHeads;
         NumLayers = numLayers;
         NumQueryGroups = numQueryGroups;
-        TokenEmbedding = new Embedding (vocabSize, embedSize, rand);
+        TokenEmbedding = new Embedding (vocabSize, embedSize, random);
         TransformerBlocks = new List<TransformerBlock> ();
         for (int i = 0; i < numLayers; i++)
-            TransformerBlocks.Add (new TransformerBlock (embedSize, hiddenSize, numHeads, numQueryGroups, rand));
+            TransformerBlocks.Add (new TransformerBlock (embedSize, hiddenSize, numHeads, numQueryGroups, random));
         FinalRMSNorm = new RMSNorm (embedSize);
-
-        // Weight tying: OutputProjection is the same as TokenEmbedding.Weights
     }
 
     public List<double[]> Forward (int[] inputTokens) {
@@ -887,22 +853,18 @@ public class LlamaForCausalLM
 
         // Backward through OutputProjection for each time step
         for (int t = 0; t < embeddings.Count; t++) {
-            // Use cached final embeddings
             var finalEmbedding = finalEmbeddings[t];
 
             // Gradients w.r.t. TokenEmbedding.Weights (due to weight tying)
-            for (int i = 0; i < VocabSize; i++) {
-                for (int j = 0; j < EmbedSize; j++) {
-                    TokenEmbedding.Gradients[i, j] += dLogitsList[t][i] * finalEmbedding[j];
-                }
-            }
+            for (int i = 0; i < VocabSize; i++)
+            for (int j = 0; j < EmbedSize; j++)
+                TokenEmbedding.Gradients[i, j] += dLogitsList[t][i] * finalEmbedding[j];
 
             // Gradients w.r.t. final embeddings
             double[] dFinalEmbedding = new double[EmbedSize];
-            for (int j = 0; j < EmbedSize; j++) {
-                for (int i = 0; i < VocabSize; i++)
-                    dFinalEmbedding[j] += TokenEmbedding.Weights[i, j] * dLogitsList[t][i];
-            }
+            for (int j = 0; j < EmbedSize; j++)
+            for (int i = 0; i < VocabSize; i++)
+                dFinalEmbedding[j] += TokenEmbedding.Weights[i, j] * dLogitsList[t][i];
 
             // Backward through FinalRMSNorm
             double[] dEmbedding = FinalRMSNorm.Backward (dFinalEmbedding, finalRMSNormCaches[t]);
@@ -919,9 +881,8 @@ public class LlamaForCausalLM
         }
 
         // Backward through TokenEmbedding
-        for (int i = 0; i < inputTokens.Length; i++) {
+        for (int i = 0; i < inputTokens.Length; i++)
             TokenEmbedding.Backward (inputTokens[i], dEmbeddings[i]);
-        }
     }
 }
 
@@ -930,9 +891,7 @@ public static class LossFunctions
 {
     public static double CrossEntropyLoss (double[] logits, int targetToken, out double[] dLogits) {
         double[] probabilities = MathOps.Softmax (logits);
-        dLogits = new double[logits.Length];
-        for (int i = 0; i < logits.Length; i++)
-            dLogits[i] = probabilities[i];
+        dLogits = probabilities.ToArray ();
         dLogits[targetToken] -= 1.0; // Gradient of softmax cross-entropy
         return -Math.Log (probabilities[targetToken] + 1e-12);
     }
@@ -946,7 +905,7 @@ public class AdamOptimizer
     public double Beta2;
     public double Epsilon;
     private int timestep;
-    public double GradientClipValue; // Added for gradient clipping
+    public double GradientClipValue;
 
     public AdamOptimizer (double learningRate, double beta1 = 0.9, double beta2 = 0.999, double epsilon = 1e-8, double gradientClipValue = 1.0) {
         LearningRate = learningRate;
@@ -975,9 +934,8 @@ public class AdamOptimizer
             allGradients.Add (block.Norm2.dGamma);
 
             // SelfAttention gradients
-            for (int g = 0; g < block.SelfAttention.NumQueryGroups; g++) {
+            for (int g = 0; g < block.SelfAttention.NumQueryGroups; g++)
                 allGradients.Add (block.SelfAttention.dWq[g].Cast<double> ().ToArray ());
-            }
 
             allGradients.Add (block.SelfAttention.dWo.Cast<double> ().ToArray ());
             for (int h = 0; h < block.SelfAttention.NumHeads; h++) {
@@ -995,14 +953,12 @@ public class AdamOptimizer
         // Compute global norm
         double globalNorm = Math.Sqrt (allGradients.SelectMany (g => g).Select (v => v * v).Sum ());
 
-        double clipCoeff = GradientClipValue / (globalNorm + 1e-6);
-        if (clipCoeff > 1.0) clipCoeff = 1.0;
+        double clipCoeff = Math.Min (GradientClipValue / (globalNorm + 1e-6), 1.0);
 
         // Update TokenEmbedding weights
         UpdateParameters (model.TokenEmbedding.Weights, model.TokenEmbedding.Gradients,
             model.TokenEmbedding.mWeights, model.TokenEmbedding.vWeights, clipCoeff);
-
-        ZeroGradients (model.TokenEmbedding.Gradients);
+        MathOps.ZeroGradients (model.TokenEmbedding.Gradients);
 
         // Update RMSNorm parameters
         UpdateRMSNorm (model.FinalRMSNorm, clipCoeff);
@@ -1016,21 +972,21 @@ public class AdamOptimizer
             for (int g = 0; g < block.SelfAttention.NumQueryGroups; g++) {
                 UpdateParameters (block.SelfAttention.Wq[g], block.SelfAttention.dWq[g],
                     block.SelfAttention.mWq[g], block.SelfAttention.vWq[g], clipCoeff);
-                ZeroGradients (block.SelfAttention.dWq[g]);
+                MathOps.ZeroGradients (block.SelfAttention.dWq[g]);
             }
 
             UpdateParameters (block.SelfAttention.Wo, block.SelfAttention.dWo,
                 block.SelfAttention.mWo, block.SelfAttention.vWo, clipCoeff);
-            ZeroGradients (block.SelfAttention.dWo);
+            MathOps.ZeroGradients (block.SelfAttention.dWo);
 
             for (int h = 0; h < block.SelfAttention.NumHeads; h++) {
                 UpdateParameters (block.SelfAttention.Wk[h], block.SelfAttention.dWk[h],
                     block.SelfAttention.mWk[h], block.SelfAttention.vWk[h], clipCoeff);
-                ZeroGradients (block.SelfAttention.dWk[h]);
+                MathOps.ZeroGradients (block.SelfAttention.dWk[h]);
 
                 UpdateParameters (block.SelfAttention.Wv[h], block.SelfAttention.dWv[h],
                     block.SelfAttention.mWv[h], block.SelfAttention.vWv[h], clipCoeff);
-                ZeroGradients (block.SelfAttention.dWv[h]);
+                MathOps.ZeroGradients (block.SelfAttention.dWv[h]);
             }
 
             // Update FeedForward parameters
@@ -1043,10 +999,8 @@ public class AdamOptimizer
         double biasCorrection2 = 1 - Math.Pow (Beta2, timestep);
 
         for (int i = 0; i < rmsNorm.Size; i++) {
-            // Apply global norm clipping
             double gradGamma = rmsNorm.dGamma[i] * clipCoeff;
 
-            // Update Gamma
             rmsNorm.mGamma[i] = Beta1 * rmsNorm.mGamma[i] + (1 - Beta1) * gradGamma;
             rmsNorm.vGamma[i] = Beta2 * rmsNorm.vGamma[i] + (1 - Beta2) * gradGamma * gradGamma;
 
@@ -1060,16 +1014,15 @@ public class AdamOptimizer
     }
 
     private void UpdateFeedForward (FeedForward feedForward, double clipCoeff) {
-        // Update W1 and B1
         UpdateParameters (feedForward.W1, feedForward.dW1, feedForward.mW1, feedForward.vW1, clipCoeff);
         UpdateParameters (feedForward.B1, feedForward.dB1, feedForward.mB1, feedForward.vB1, clipCoeff);
-        ZeroGradients (feedForward.dW1);
-        ZeroGradients (feedForward.dB1);
+        MathOps.ZeroGradients (feedForward.dW1);
+        MathOps.ZeroGradients (feedForward.dB1);
 
         UpdateParameters (feedForward.W2, feedForward.dW2, feedForward.mW2, feedForward.vW2, clipCoeff);
         UpdateParameters (feedForward.B2, feedForward.dB2, feedForward.mB2, feedForward.vB2, clipCoeff);
-        ZeroGradients (feedForward.dW2);
-        ZeroGradients (feedForward.dB2);
+        MathOps.ZeroGradients (feedForward.dW2);
+        MathOps.ZeroGradients (feedForward.dB2);
     }
 
     private void UpdateParameters (double[,] weights, double[,] gradients, double[,] m, double[,] v, double clipCoeff) {
@@ -1080,7 +1033,6 @@ public class AdamOptimizer
 
         for (int i = 0; i < rows; i++)
         for (int j = 0; j < cols; j++) {
-            // Apply global norm clipping
             double grad = gradients[i, j] * clipCoeff;
 
             m[i, j] = Beta1 * m[i, j] + (1 - Beta1) * grad;
@@ -1099,7 +1051,6 @@ public class AdamOptimizer
         double biasCorrection2 = 1 - Math.Pow (Beta2, timestep);
 
         for (int i = 0; i < length; i++) {
-            // Apply global norm clipping
             double grad = gradients[i] * clipCoeff;
 
             m[i] = Beta1 * m[i] + (1 - Beta1) * grad;
@@ -1110,17 +1061,5 @@ public class AdamOptimizer
 
             weights[i] -= LearningRate * mHat / (Math.Sqrt (vHat) + Epsilon);
         }
-    }
-
-    private void ZeroGradients (double[,] gradients) {
-        int rows = gradients.GetLength (0);
-        int cols = gradients.GetLength (1);
-        for (int i = 0; i < rows; i++)
-        for (int j = 0; j < cols; j++)
-            gradients[i, j] = 0.0;
-    }
-
-    private void ZeroGradients (double[] gradients) {
-        Array.Fill (gradients, 0.0);
     }
 }
