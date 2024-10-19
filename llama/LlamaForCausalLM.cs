@@ -606,12 +606,8 @@ public class TransformerBlock
         for (int i = 0; i < seqLen; i++)
             dInputs.Add (new double[EmbedSize]);
 
-        List<double[]> dSaAdded = new List<double[]> ();
-        for (int i = 0; i < seqLen; i++)
-            dSaAdded.Add (new double[EmbedSize]);
-
         // Backward through FeedForward and second residual connection
-        List<double[]> dNormedSaAdded = new List<double[]> ();
+        List<double[]> dSaAdded = new List<double[]> ();
         for (int i = 0; i < seqLen; i++) {
             // Gradient w.r.t. the output of the feed-forward layer
             double[] dFfAdded = gradOutputs[i];
@@ -621,43 +617,42 @@ public class TransformerBlock
             double[] dSaAdd = new double[EmbedSize];
             for (int j = 0; j < EmbedSize; j++) {
                 dFfOutput[j] = dFfAdded[j];
-                dSaAdd[j] += dFfAdded[j]; // Accumulate gradient from the residual path
+                dSaAdd[j] = dFfAdded[j];
             }
 
             // Backprop through feed-forward layer
             double[] dNormedSaAddedSingle = FeedForward.Backward (dFfOutput, cache.ffCaches[i]);
-            dNormedSaAdded.Add (dNormedSaAddedSingle);
+
+            // Backprop through second LayerNorm
+            double[] dSaAddedNorm = Norm2.Backward (dNormedSaAddedSingle, cache.norm2Caches[i]);
 
             // Accumulate gradients
             for (int j = 0; j < EmbedSize; j++)
-                dSaAdd[j] += dNormedSaAddedSingle[j];
+                dSaAdd[j] += dSaAddedNorm[j];
 
             // Store gradient for saAdd
-            dSaAdded[i] = dSaAdd;
-        }
-
-        // Backward through second LayerNorm
-        List<double[]> dSaAddedNorm = new List<double[]> ();
-        for (int i = 0; i < seqLen; i++) {
-            dSaAddedNorm.Add (Norm2.Backward (dSaAdded[i], cache.norm2Caches[i]));
+            dSaAdded.Add (dSaAdd);
         }
 
         // Backward through Self-Attention and first residual connection
-        List<double[]> dNormedInputs = SelfAttention.Backward (dSaAddedNorm, cache.saCache);
+        List<double[]> dNormedInputs = SelfAttention.Backward (dSaAdded, cache.saCache);
 
+        // Backward through first LayerNorm and residual connection
         for (int i = 0; i < seqLen; i++) {
-            // Backprop through first residual connection
+            double[] dSaOutput = dNormedInputs[i];
+
+            // Backprop through residual connection
             for (int j = 0; j < EmbedSize; j++) {
-                dInputs[i][j] += dSaAddedNorm[i][j];
+                dInputs[i][j] += dSaAdded[i][j]; // Accumulate gradient from residual
+                dInputs[i][j] += dSaOutput[j]; // Accumulate gradient from Self-Attention
             }
 
             // Backprop through first LayerNorm
-            double[] dInputNorm = Norm1.Backward (dNormedInputs[i], cache.norm1Caches[i]);
+            double[] dInputNorm = Norm1.Backward (dInputs[i], cache.norm1Caches[i]);
 
-            // Accumulate gradients
-            for (int j = 0; j < EmbedSize; j++) {
-                dInputs[i][j] += dInputNorm[j];
-            }
+            // Assign gradients to avoid double-counting
+            for (int j = 0; j < EmbedSize; j++)
+                dInputs[i][j] = dInputNorm[j];
         }
 
         return dInputs;
@@ -900,14 +895,24 @@ public class AdamOptimizer
         double biasCorrection1 = 1 - Math.Pow (Beta1, timestep);
         double biasCorrection2 = 1 - Math.Pow (Beta2, timestep);
 
+        // Compute global norm
+        double globalNormGamma = ComputeGlobalNorm (layerNorm.dGamma);
+        double globalNormBeta = ComputeGlobalNorm (layerNorm.dBeta);
+
+        double clipCoeffGamma = GradientClipValue / (globalNormGamma + 1e-6);
+        if (clipCoeffGamma > 1.0) clipCoeffGamma = 1.0;
+
+        double clipCoeffBeta = GradientClipValue / (globalNormBeta + 1e-6);
+        if (clipCoeffBeta > 1.0) clipCoeffBeta = 1.0;
+
         for (int i = 0; i < layerNorm.Size; i++) {
-            // Gradient Clipping
-            layerNorm.dGamma[i] = Math.Min (Math.Max (layerNorm.dGamma[i], -GradientClipValue), GradientClipValue);
-            layerNorm.dBeta[i] = Math.Min (Math.Max (layerNorm.dBeta[i], -GradientClipValue), GradientClipValue);
+            // Apply global norm clipping
+            double gradGamma = layerNorm.dGamma[i] * clipCoeffGamma;
+            double gradBeta = layerNorm.dBeta[i] * clipCoeffBeta;
 
             // Update Gamma
-            layerNorm.mGamma[i] = Beta1 * layerNorm.mGamma[i] + (1 - Beta1) * layerNorm.dGamma[i];
-            layerNorm.vGamma[i] = Beta2 * layerNorm.vGamma[i] + (1 - Beta2) * layerNorm.dGamma[i] * layerNorm.dGamma[i];
+            layerNorm.mGamma[i] = Beta1 * layerNorm.mGamma[i] + (1 - Beta1) * gradGamma;
+            layerNorm.vGamma[i] = Beta2 * layerNorm.vGamma[i] + (1 - Beta2) * gradGamma * gradGamma;
 
             double mHatGamma = layerNorm.mGamma[i] / biasCorrection1;
             double vHatGamma = layerNorm.vGamma[i] / biasCorrection2;
@@ -915,8 +920,8 @@ public class AdamOptimizer
             layerNorm.Gamma[i] -= LearningRate * mHatGamma / (Math.Sqrt (vHatGamma) + Epsilon);
 
             // Update Beta
-            layerNorm.mBeta[i] = Beta1 * layerNorm.mBeta[i] + (1 - Beta1) * layerNorm.dBeta[i];
-            layerNorm.vBeta[i] = Beta2 * layerNorm.vBeta[i] + (1 - Beta2) * layerNorm.dBeta[i] * layerNorm.dBeta[i];
+            layerNorm.mBeta[i] = Beta1 * layerNorm.mBeta[i] + (1 - Beta1) * gradBeta;
+            layerNorm.vBeta[i] = Beta2 * layerNorm.vBeta[i] + (1 - Beta2) * gradBeta * gradBeta;
 
             double mHatBeta = layerNorm.mBeta[i] / biasCorrection1;
             double vHatBeta = layerNorm.vBeta[i] / biasCorrection2;
@@ -941,18 +946,42 @@ public class AdamOptimizer
         ZeroGradients (feedForward.dB2);
     }
 
+    private double ComputeGlobalNorm (double[,] gradients) {
+        double sum = 0.0;
+        int rows = gradients.GetLength (0);
+        int cols = gradients.GetLength (1);
+        for (int i = 0; i < rows; i++)
+        for (int j = 0; j < cols; j++)
+            sum += gradients[i, j] * gradients[i, j];
+        return Math.Sqrt (sum);
+    }
+
+    private double ComputeGlobalNorm (double[] gradients) {
+        double sum = 0.0;
+        int length = gradients.Length;
+        for (int i = 0; i < length; i++)
+            sum += gradients[i] * gradients[i];
+        return Math.Sqrt (sum);
+    }
+
     private void UpdateParameters (double[,] weights, double[,] gradients, double[,] m, double[,] v) {
         int rows = weights.GetLength (0);
         int cols = weights.GetLength (1);
         double biasCorrection1 = 1 - Math.Pow (Beta1, timestep);
         double biasCorrection2 = 1 - Math.Pow (Beta2, timestep);
+
+        // Compute global norm
+        double globalNorm = ComputeGlobalNorm (gradients);
+        double clipCoeff = GradientClipValue / (globalNorm + 1e-6);
+        if (clipCoeff > 1.0) clipCoeff = 1.0;
+
         for (int i = 0; i < rows; i++)
         for (int j = 0; j < cols; j++) {
-            // Gradient Clipping
-            gradients[i, j] = Math.Min (Math.Max (gradients[i, j], -GradientClipValue), GradientClipValue);
+            // Apply global norm clipping
+            double grad = gradients[i, j] * clipCoeff;
 
-            m[i, j] = Beta1 * m[i, j] + (1 - Beta1) * gradients[i, j];
-            v[i, j] = Beta2 * v[i, j] + (1 - Beta2) * gradients[i, j] * gradients[i, j];
+            m[i, j] = Beta1 * m[i, j] + (1 - Beta1) * grad;
+            v[i, j] = Beta2 * v[i, j] + (1 - Beta2) * grad * grad;
 
             double mHat = m[i, j] / biasCorrection1;
             double vHat = v[i, j] / biasCorrection2;
@@ -965,12 +994,18 @@ public class AdamOptimizer
         int length = weights.Length;
         double biasCorrection1 = 1 - Math.Pow (Beta1, timestep);
         double biasCorrection2 = 1 - Math.Pow (Beta2, timestep);
-        for (int i = 0; i < length; i++) {
-            // Gradient Clipping
-            gradients[i] = Math.Min (Math.Max (gradients[i], -GradientClipValue), GradientClipValue);
 
-            m[i] = Beta1 * m[i] + (1 - Beta1) * gradients[i];
-            v[i] = Beta2 * v[i] + (1 - Beta2) * gradients[i] * gradients[i];
+        // Compute global norm
+        double globalNorm = ComputeGlobalNorm (gradients);
+        double clipCoeff = GradientClipValue / (globalNorm + 1e-6);
+        if (clipCoeff > 1.0) clipCoeff = 1.0;
+
+        for (int i = 0; i < length; i++) {
+            // Apply global norm clipping
+            double grad = gradients[i] * clipCoeff;
+
+            m[i] = Beta1 * m[i] + (1 - Beta1) * grad;
+            v[i] = Beta2 * v[i] + (1 - Beta2) * grad * grad;
 
             double mHat = m[i] / biasCorrection1;
             double vHat = v[i] / biasCorrection2;
