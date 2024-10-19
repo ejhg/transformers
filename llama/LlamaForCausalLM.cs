@@ -360,24 +360,23 @@ public class SelfAttention
         for (int j = 0; j < EmbedSize; j++)
             this.dWo[i, j] += dWo[i, j];
 
-        // Initialize gradients for Wq
-        double[][,] dWq = new double[NumQueryGroups][,];
-        for (int g = 0; g < NumQueryGroups; g++) {
-            dWq[g] = new double[HeadDim, EmbedSize];
+        // Initialize per-head gradients
+        List<double[][]> perHead_dQs = new List<double[][]> ();
+        List<double[][]> perHead_dKs = new List<double[][]> ();
+        List<double[][]> perHead_dVs = new List<double[][]> ();
+        for (int h = 0; h < NumHeads; h++) {
+            perHead_dQs.Add (new double[seqLen][]);
+            perHead_dKs.Add (new double[seqLen][]);
+            perHead_dVs.Add (new double[seqLen][]);
+            for (int i = 0; i < seqLen; i++) {
+                perHead_dQs[h][i] = new double[HeadDim];
+                perHead_dKs[h][i] = new double[HeadDim];
+                perHead_dVs[h][i] = new double[HeadDim];
+            }
         }
 
         // Backprop through attention heads
         for (int h = 0; h < NumHeads; h++) {
-            // Initialize gradients for Q, K, V
-            double[][] dQs = new double[seqLen][];
-            double[][] dKs = new double[seqLen][];
-            double[][] dVs = new double[seqLen][];
-            for (int i = 0; i < seqLen; i++) {
-                dQs[i] = new double[HeadDim];
-                dKs[i] = new double[HeadDim];
-                dVs[i] = new double[HeadDim];
-            }
-
             // Backprop through attention mechanism
             for (int t = seqLen - 1; t >= 0; t--) {
                 double[] dZ = new double[HeadDim];
@@ -387,7 +386,7 @@ public class SelfAttention
                 double[] dAlpha = new double[t + 1];
                 for (int j = 0; j <= t; j++) {
                     for (int i = 0; i < HeadDim; i++) {
-                        dVs[j][i] += cache.Softmaxes[h][t][j] * dZ[i];
+                        perHead_dVs[h][j][i] += cache.Softmaxes[h][t][j] * dZ[i];
                     }
 
                     dAlpha[j] += MathOps.Dot (cache.Vs[h][j], dZ);
@@ -407,8 +406,8 @@ public class SelfAttention
                 double scale = 1.0 / Math.Sqrt (HeadDim);
                 for (int j = 0; j <= t; j++) {
                     for (int i = 0; i < HeadDim; i++) {
-                        dQs[t][i] += dScores[j] * cache.Ks[h][j][i] * scale;
-                        dKs[j][i] += dScores[j] * cache.Qs[h][t][i] * scale;
+                        perHead_dQs[h][t][i] += dScores[j] * cache.Ks[h][j][i] * scale;
+                        perHead_dKs[h][j][i] += dScores[j] * cache.Qs[h][t][i] * scale;
                     }
                 }
             }
@@ -417,38 +416,64 @@ public class SelfAttention
             for (int t = 0; t < seqLen; t++) {
                 int position = t + cache.StartPosition;
 
-                dQs[t] = BackwardRoPE (dQs[t], cache.Qs[h][t], position);
-                dKs[t] = BackwardRoPE (dKs[t], cache.Ks[h][t], position);
+                perHead_dQs[h][t] = BackwardRoPE (perHead_dQs[h][t], cache.Qs[h][t], position);
+                perHead_dKs[h][t] = BackwardRoPE (perHead_dKs[h][t], cache.Ks[h][t], position);
+            }
+        }
+
+        // Group-level accumulation for Wq and dInputs
+        for (int g = 0; g < NumQueryGroups; g++) {
+            int startHead = g * headsPerGroup;
+            int endHead = startHead + headsPerGroup;
+
+            // Initialize dQs_group[t]
+            double[][] dQs_group = new double[seqLen][];
+            for (int t = 0; t < seqLen; t++) {
+                dQs_group[t] = new double[HeadDim];
             }
 
-            // Backprop through linear layers Wq, Wk, Wv
-            int groupIndex = h / headsPerGroup;
+            // Sum dQs over all heads in group g
+            for (int h = startHead; h < endHead; h++) {
+                for (int t = 0; t < seqLen; t++) {
+                    for (int i = 0; i < HeadDim; i++) {
+                        dQs_group[t][i] += perHead_dQs[h][t][i];
+                    }
+                }
+            }
 
+            // Update Wq and dInputs using grouped gradients
             for (int t = 0; t < seqLen; t++) {
                 double[] x = cache.Inputs[t];
 
                 // Accumulate gradients for Wq
                 for (int i = 0; i < HeadDim; i++) {
                     for (int j = 0; j < EmbedSize; j++) {
-                        dWq[groupIndex][i, j] += dQs[t][i] * x[j];
+                        dWq[g][i, j] += dQs_group[t][i] * x[j];
                     }
                 }
 
                 // Update dInputs
                 for (int i = 0; i < HeadDim; i++) {
                     for (int j = 0; j < EmbedSize; j++) {
-                        dInputs[t][j] += Wq[groupIndex][i, j] * dQs[t][i];
+                        dInputs[t][j] += Wq[g][i, j] * dQs_group[t][i];
                     }
                 }
+            }
+        }
+
+        // Backprop through Wk, Wv, and accumulate dInputs
+        for (int h = 0; h < NumHeads; h++) {
+            for (int t = 0; t < seqLen; t++) {
+                double[] x = cache.Inputs[t];
 
                 // Gradients w.r.t. Wk and Wv
                 for (int i = 0; i < HeadDim; i++) {
                     for (int j = 0; j < EmbedSize; j++) {
-                        dWk[h][i, j] += dKs[t][i] * x[j];
-                        dInputs[t][j] += Wk[h][i, j] * dKs[t][i];
+                        dWk[h][i, j] += perHead_dKs[h][t][i] * x[j];
+                        dInputs[t][j] += Wk[h][i, j] * perHead_dKs[h][t][i];
 
-                        dWv[h][i, j] += dVs[t][i] * x[j];
-                        dInputs[t][j] += Wv[h][i, j] * dVs[t][i];
+                        dWv[h][i, j] += perHead_dVs[h][t][i] * x[j];
+                        dInputs[t][j] += Wv[h][i, j] * perHead_dVs[h][t][i];
                     }
                 }
             }
@@ -458,15 +483,6 @@ public class SelfAttention
                 for (int j = 0; j < EmbedSize; j++) {
                     this.dWk[h][i, j] += dWk[h][i, j];
                     this.dWv[h][i, j] += dWv[h][i, j];
-                }
-            }
-        }
-
-        // Accumulate gradients for Wq
-        for (int g = 0; g < NumQueryGroups; g++) {
-            for (int i = 0; i < HeadDim; i++) {
-                for (int j = 0; j < EmbedSize; j++) {
-                    this.dWq[g][i, j] += dWq[g][i, j];
                 }
             }
         }
@@ -775,7 +791,7 @@ public class TransformerBlock
 
             // Accumulate gradients
             for (int j = 0; j < EmbedSize; j++)
-                dInputs[i][j] += dNormedInput[j] + dNormedInputs[i][j]; // Correct gradient accumulation
+                dInputs[i][j] += dNormedInput[j] + dSaAdded[i][j];
         }
 
         return dInputs;

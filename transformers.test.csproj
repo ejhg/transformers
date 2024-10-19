@@ -6,12 +6,8 @@
         <Nullable>enable</Nullable>
     </PropertyGroup>
     <ItemGroup>
-      <Compile Remove="tests\**" />
-    </ItemGroup>
-    <ItemGroup>
-      <EmbeddedResource Remove="tests\**" />
-    </ItemGroup>
-    <ItemGroup>
-      <None Remove="tests\**" />
+        <PackageReference Include="NUnit" Version="3.14.0" />
+        <PackageReference Include="NUnit3TestAdapter" Version="4.6.0"/>
+        <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.5.0"/>
     </ItemGroup>
 </Project>
