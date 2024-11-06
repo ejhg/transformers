@@ -1,9 +1,6 @@
-using System;
-using System.Collections.Generic;
-using System.Linq;
 using System.Numerics; // For Complex numbers
 
-namespace TransformerModel
+namespace llama2
 {
     public class ModelArgs
     {
