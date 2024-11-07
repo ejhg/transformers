@@ -478,16 +478,6 @@ static class TransformerModel
     }
 }
 
-public class TokenIndex : IComparable<TokenIndex>
-{
-    public string str;
-    public int id;
-
-    public int CompareTo (TokenIndex other) {
-        return string.Compare (str, other.str, StringComparison.Ordinal);
-    }
-}
-
 /**
  * The Byte Pair Encoding (BPE) Tokenizer that translates strings <-> tokens
  */
@@ -495,16 +485,13 @@ public class Tokenizer
 {
     public string[] vocab;
     public float[] vocab_scores;
-    public TokenIndex[] sorted_vocab;
-    public int vocab_size;
-    public uint max_token_length;
+    public Dictionary<string, int> vocab_lookup;
     public string[] byte_pieces = new string[512];
 
     public void BuildTokenizer (string tokenizer_path, int vocab_size) {
-        this.vocab_size = vocab_size;
         vocab = new string[vocab_size];
         vocab_scores = new float[vocab_size];
-        sorted_vocab = null;
+        vocab_lookup = null;
 
         // Initialize byte pieces
         for (int i = 0; i < 256; i++) {
@@ -515,7 +502,9 @@ public class Tokenizer
         using FileStream fs = new FileStream (tokenizer_path, FileMode.Open, FileAccess.Read);
         using BinaryReader br = new BinaryReader (fs);
 
-        max_token_length = br.ReadUInt32 ();
+        // variable not used, but must be read from structure
+        var max_token_length = br.ReadUInt32 ();
+
         int len;
         for (int i = 0; i < vocab_size; i++) {
             vocab_scores[i] = br.ReadSingle ();
@@ -556,42 +545,19 @@ public class Tokenizer
     }
 
     int StrLookup (string str) {
-        if (sorted_vocab == null) {
-            sorted_vocab = new TokenIndex[vocab_size];
-            for (int i = 0; i < vocab_size; i++) {
-                sorted_vocab[i] = new TokenIndex {
-                    str = vocab[i],
-                    id = i
-                };
-            }
-
-            Array.Sort (sorted_vocab);
+        if (vocab_lookup == null) {
+            vocab_lookup = vocab
+                .Select ((str, index) => (str, index))
+                .ToDictionary ();
         }
 
-        int index = Array.BinarySearch (sorted_vocab, new TokenIndex { str = str });
-        if (index >= 0) {
-            return sorted_vocab[index].id;
-        }
-
-        return -1;
+        return vocab_lookup.GetValueOrDefault (str, -1);
     }
 
     public void Encode (string text, bool bos, bool eos, List<int> tokens) {
         if (text == null) {
             Console.Error.WriteLine ("Cannot encode null text");
             Environment.Exit (1);
-        }
-
-        if (sorted_vocab == null) {
-            sorted_vocab = new TokenIndex[vocab_size];
-            for (int i = 0; i < vocab_size; i++) {
-                sorted_vocab[i] = new TokenIndex {
-                    str = vocab[i],
-                    id = i
-                };
-            }
-
-            Array.Sort (sorted_vocab);
         }
 
         // Start encoding
