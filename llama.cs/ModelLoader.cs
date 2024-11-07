@@ -2,14 +2,7 @@ namespace llama.cs;
 
 public class ModelLoader
 {
-    public static model load (string checkpoint_path) {
-        var t = new model ();
-        (t.config, t.weights) = ReadCheckpoint (checkpoint_path);
-        t.state = createRunState (t.config);
-        return t;
-    }
-
-    static run_state createRunState (config p) {
+    public static run_state createRunState (config p) {
         int head_size = p.dim / p.n_heads;
         int kv_head_size = head_size; // Assuming kv_head_size == head_size
 
@@ -167,7 +160,7 @@ public class ModelLoader
         return w;
     }
 
-    static (config config, weights weights) ReadCheckpoint (string checkpoint) {
+    public static (config config, weights weights) ReadCheckpoint (string checkpoint) {
         using FileStream fs = new FileStream (checkpoint, FileMode.Open, FileAccess.Read);
         using BinaryReader br = new BinaryReader (fs);
 
