@@ -2,4 +2,4 @@
 
 // LlamaTest.run ();
 
-llama.cs.Program.main ("resources/stories15M.bin");
+llama.cs.Program.main ("resources/stories15M.bin", "-s", "1");
