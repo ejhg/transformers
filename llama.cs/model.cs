@@ -505,12 +505,10 @@ public class Tokenizer
         // variable not used, but must be read from structure
         var max_token_length = br.ReadUInt32 ();
 
-        int len;
         for (int i = 0; i < vocab_size; i++) {
             vocab_scores[i] = br.ReadSingle ();
-            len = br.ReadInt32 ();
-            byte[] strBytes = br.ReadBytes (len);
-            vocab[i] = Encoding.UTF8.GetString (strBytes);
+            var len = br.ReadInt32 ();
+            vocab[i] = Encoding.UTF8.GetString (br.ReadBytes (len));
         }
     }
 
@@ -531,17 +529,11 @@ public class Tokenizer
     }
 
     public void SafePrint (string piece) {
-        if (string.IsNullOrEmpty (piece))
+        if (string.IsNullOrEmpty (piece) || piece.Length == 1 && char.IsControl (piece[0]) && !char.IsWhiteSpace (piece[0])) {
             return;
-
-        if (piece.Length == 1) {
-            char c = piece[0];
-            if (!char.IsControl (c) || char.IsWhiteSpace (c)) {
-                Console.Write (piece);
-            }
-        } else {
-            Console.Write (piece);
         }
+
+        Console.Write (piece);
     }
 
     int StrLookup (string str) {
