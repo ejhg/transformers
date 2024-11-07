@@ -2,7 +2,7 @@ namespace llama.cs;
 
 public class Generator
 {
-    public static void Generate (Transformer transformer, Tokenizer tokenizer, Sampler sampler, string prompt, int steps) {
+    public static void Generate (model transformer, Tokenizer tokenizer, Sampler sampler, string prompt, int steps) {
         if (prompt == null) {
             prompt = "";
         }
@@ -21,7 +21,7 @@ public class Generator
         int pos = 0;
 
         while (pos < steps) {
-            float[] logits = TransformerModel.Forward (transformer, token, pos);
+            float[] logits = ForwardPass.Forward (transformer, token, pos);
 
             if (pos < tokens.Count - 1) {
                 next = tokens[pos + 1];
@@ -52,7 +52,7 @@ public class Generator
         return DateTimeOffset.Now.ToUnixTimeMilliseconds ();
     }
 
-    public static void Chat (Transformer transformer, Tokenizer tokenizer, Sampler sampler, string cli_user_prompt, string cli_system_prompt,
+    public static void Chat (model transformer, Tokenizer tokenizer, Sampler sampler, string cli_user_prompt, string cli_system_prompt,
         int steps) {
         // Buffers for prompts
         string system_prompt = "";
@@ -114,7 +114,7 @@ public class Generator
             }
 
             // Forward the transformer to get logits
-            float[] logits = TransformerModel.Forward (transformer, token, pos);
+            float[] logits = ForwardPass.Forward (transformer, token, pos);
             next = sampler.Sample (logits);
             pos++;
 

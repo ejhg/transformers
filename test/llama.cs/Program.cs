@@ -78,7 +78,7 @@ class Program
         if (steps < 0) steps = 0;
 
         // Build the Transformer via the model .bin file
-        var transformer = TransformerModel.load (checkpoint_path);
+        var transformer = ModelLoader.load (checkpoint_path);
 
         if (steps == 0 || steps > transformer.config.seq_len) {
             steps = transformer.config.seq_len;

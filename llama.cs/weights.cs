@@ -1,6 +1,6 @@
 namespace llama.cs;
 
-public class TransformerWeights
+public class weights
 {
     // Token embedding table
     public float[][] token_embedding_table; // [vocab_size, dim]

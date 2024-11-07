@@ -1,6 +1,6 @@
 namespace llama.cs;
 
-public class Config
+public class config
 {
     public int dim; // Transformer dimension
     public int hidden_dim; // For FFN layers

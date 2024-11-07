@@ -1,6 +1,6 @@
 namespace llama.cs;
 
-public class RunState
+public class run_state
 {
     // Current wave of activations
     public float[] x; // [dim]
