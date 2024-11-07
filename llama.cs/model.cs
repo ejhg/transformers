@@ -54,7 +54,6 @@ namespace llama.cs
         public float[] q; // (dim)
         public float[] k; // (dim)
         public float[] v; // (dim)
-        public float[] att; // (n_heads * seq_len)
         public float[] logits; // Output logits
 
         // KV cache
@@ -67,10 +66,6 @@ namespace llama.cs
         public Config config; // Hyperparameters
         public TransformerWeights weights; // Model weights
         public RunState state; // Run state buffers
-
-        // Data and file size for the checkpoint
-        public float[] data; // Loaded data from checkpoint
-        public long file_size; // Size of the checkpoint file in bytes
     }
 
     public static class TransformerModel
@@ -85,7 +80,6 @@ namespace llama.cs
             s.q = new float[p.dim];
             s.k = new float[p.dim];
             s.v = new float[p.dim];
-            s.att = new float[p.n_heads * p.seq_len];
             s.logits = new float[p.vocab_size];
             s.key_cache = new float[p.n_layers * p.seq_len * kv_dim];
             s.value_cache = new float[p.n_layers * p.seq_len * kv_dim];
@@ -188,7 +182,7 @@ namespace llama.cs
             t.weights = new TransformerWeights ();
             t.state = new RunState ();
 
-            ReadCheckpoint (checkpoint_path, t.config, t.weights, out t.data, out t.file_size);
+            ReadCheckpoint (checkpoint_path, t.config, t.weights, out _, out _);
             MallocRunState (t.state, t.config);
         }
 
@@ -295,24 +289,23 @@ namespace llama.cs
                 Array.Copy (s.v, 0, s.value_cache, vOffset, kv_dim);
 
                 // Multihead attention
-                int h;
-                Parallel.For (0, p.n_heads, h => {
+                for (int h = 0; h < p.n_heads; h++) {
                     int headOffset = h * head_size;
-                    float[] q = new float[head_size];
-                    Array.Copy (s.q, headOffset, q, 0, head_size);
 
-                    // Attention scores
+                    // Indices for q
+                    int qStart = headOffset;
+
+                    // Initialize attention scores
                     float[] att = new float[pos + 1];
 
+                    // Iterate over all timesteps
                     for (int t = 0; t <= pos; t++) {
                         int kHeadOffset = loff + t * kv_dim + (h / kv_mul) * head_size;
-                        float[] k = new float[head_size];
-                        Array.Copy (s.key_cache, kHeadOffset, k, 0, head_size);
 
                         // Dot product between q and k
                         float score = 0.0f;
                         for (int i = 0; i < head_size; i++) {
-                            score += q[i] * k[i];
+                            score += s.q[qStart + i] * s.key_cache[kHeadOffset + i];
                         }
 
                         score /= (float)Math.Sqrt (head_size);
@@ -322,22 +315,20 @@ namespace llama.cs
                     // Softmax the attention scores
                     Softmax (att, pos + 1);
 
-                    // Weighted sum of the values
-                    float[] xb = new float[head_size];
+                    // Zero out s.xb for this head
+                    for (int i = 0; i < head_size; i++) {
+                        s.xb[headOffset + i] = 0.0f;
+                    }
+
                     for (int t = 0; t <= pos; t++) {
                         int vHeadOffset = loff + t * kv_dim + (h / kv_mul) * head_size;
-                        float[] v = new float[head_size];
-                        Array.Copy (s.value_cache, vHeadOffset, v, 0, head_size);
 
                         float a = att[t];
                         for (int i = 0; i < head_size; i++) {
-                            xb[i] += a * v[i];
+                            s.xb[headOffset + i] += a * s.value_cache[vHeadOffset + i];
                         }
                     }
-
-                    // Store in xb
-                    Array.Copy (xb, 0, s.xb, headOffset, head_size);
-                });
+                }
 
                 // Final matmul
                 MatMul (s.xb2, s.xb, w.wo, l * p.n_heads * head_size * dim, p.n_heads * head_size, dim);
