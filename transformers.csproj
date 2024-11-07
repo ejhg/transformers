@@ -15,4 +15,7 @@
     <ItemGroup>
       <None Remove="tests\**" />
     </ItemGroup>
+    <ItemGroup>
+      <PackageReference Include="TorchSharp" Version="0.103.1" />
+    </ItemGroup>
 </Project>
