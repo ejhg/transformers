@@ -16,46 +16,56 @@ public class Config
 public class TransformerWeights
 {
     // Token embedding table
-    public float[] token_embedding_table; // (vocab_size * dim)
+    public float[][] token_embedding_table; // [vocab_size, dim]
 
-    // Weights for RMSNorms
-    public float[] rms_att_weight; // (n_layers * dim)
-    public float[] rms_ffn_weight; // (n_layers * dim)
+    public LayerWeights[] layers;
 
-    // Weights for matmuls. note dim == n_heads * head_size
-    public float[] wq; // (n_layers * dim * n_heads * head_size)
-    public float[] wk; // (n_layers * dim * n_kv_heads * head_size)
-    public float[] wv; // (n_layers * dim * n_kv_heads * head_size)
-    public float[] wo; // (n_layers * n_heads * head_size * dim)
+    public class LayerWeights
+    {
+        // Weights for RMSNorms
+        public float[] rms_att_weight; // [dim]
+        public float[] rms_ffn_weight; // [dim]
 
-    // Weights for FFN
-    public float[] w1; // (n_layers * hidden_dim * dim)
-    public float[] w2; // (n_layers * dim * hidden_dim)
-    public float[] w3; // (n_layers * hidden_dim * dim)
+        // Weights for matmuls. note dim == n_heads * head_size
+        public float[,] wq; // [n_heads * head_size][dim]
+        public float[,] wk; // [n_kv_heads * head_size][dim]
+        public float[,] wv; // [n_kv_heads * head_size][dim]
+        public float[,] wo; // [dim][n_heads * head_size]
+
+        // Weights for FFN
+        public float[,] w1; // [hidden_dim][dim]
+        public float[,] w2; // [dim][hidden_dim]
+        public float[,] w3; // [hidden_dim][dim]
+    }
 
     // Final RMSNorm
-    public float[] rms_final_weight; // (dim)
+    public float[] rms_final_weight; // [dim]
 
     // Classifier weights for the logits
-    public float[] wcls;
+    public float[][] wcls; // [vocab_size, dim]
 }
 
 public class RunState
 {
     // Current wave of activations
-    public float[] x; // (dim)
-    public float[] xb; // (dim)
-    public float[] xb2; // (dim)
-    public float[] hb; // (hidden_dim)
-    public float[] hb2; // (hidden_dim)
-    public float[] q; // (dim)
-    public float[] k; // (dim)
-    public float[] v; // (dim)
-    public float[] logits; // Output logits
+    public float[] x; // [dim]
+    public float[] xb; // [dim]
+    public float[] xb2; // [dim]
+    public float[] hb; // [hidden_dim]
+    public float[] hb2; // [hidden_dim]
+    public float[] q; // [n_heads * head_size]
+    public float[] k; // [n_kv_heads * head_size]
+    public float[] v; // [n_kv_heads * head_size]
+    public float[] logits; // [vocab_size]
 
     // KV cache
-    public float[] key_cache; // (n_layers * seq_len * kv_dim)
-    public float[] value_cache; // (n_layers * seq_len * kv_dim)
+    public LayerCache[] kv_cache;
+
+    public struct LayerCache
+    {
+        public float[][] key_cache; // [seq_len][n_kv_heads * head_size]
+        public float[][] value_cache; // [seq_len][n_kv_heads * head_size]
+    }
 }
 
 public class Transformer
@@ -68,68 +78,138 @@ public class Transformer
 static class TransformerModel
 {
     static void MallocRunState (RunState s, Config p) {
-        int kv_dim = (p.dim * p.n_kv_heads) / p.n_heads;
+        int head_size = p.dim / p.n_heads;
+        int kv_head_size = head_size; // Assuming kv_head_size == head_size
         s.x = new float[p.dim];
         s.xb = new float[p.dim];
         s.xb2 = new float[p.dim];
         s.hb = new float[p.hidden_dim];
         s.hb2 = new float[p.hidden_dim];
-        s.q = new float[p.dim];
-        s.k = new float[p.dim];
-        s.v = new float[p.dim];
+        s.q = new float[p.n_heads * head_size];
+        s.k = new float[p.n_kv_heads * kv_head_size];
+        s.v = new float[p.n_kv_heads * kv_head_size];
         s.logits = new float[p.vocab_size];
-        s.key_cache = new float[p.n_layers * p.seq_len * kv_dim];
-        s.value_cache = new float[p.n_layers * p.seq_len * kv_dim];
+
+        s.kv_cache = Enumerable
+            .Range (0, p.n_layers)
+            .Select (_ => {
+                var _cache = new RunState.LayerCache {
+                    key_cache = new float[p.seq_len][],
+                    value_cache = new float[p.seq_len][]
+                };
+
+                for (int t = 0; t < p.seq_len; t++) {
+                    _cache.key_cache[t] = new float[p.n_kv_heads * kv_head_size];
+                    _cache.value_cache[t] = new float[p.n_kv_heads * kv_head_size];
+                }
+
+                return _cache;
+            }).ToArray ();
     }
 
     static void MemoryMapWeights (TransformerWeights w, Config p, float[] data, int shared_weights) {
         int head_size = p.dim / p.n_heads;
-        long n_layers = p.n_layers;
+        int kv_head_size = head_size; // Assuming kv_head_size == head_size
+        int n_layers = p.n_layers;
         long index = 0;
 
-        w.token_embedding_table = new float[p.vocab_size * p.dim];
-        Array.Copy (data, index, w.token_embedding_table, 0, w.token_embedding_table.Length);
-        index += w.token_embedding_table.Length;
+        // Token embedding table
+        w.token_embedding_table = new float[p.vocab_size][];
+        for (int i = 0; i < p.vocab_size; i++) {
+            w.token_embedding_table[i] = new float[p.dim];
+            for (int j = 0; j < p.dim; j++) {
+                w.token_embedding_table[i][j] = data[index++];
+            }
+        }
 
-        w.rms_att_weight = new float[n_layers * p.dim];
-        Array.Copy (data, index, w.rms_att_weight, 0, w.rms_att_weight.Length);
-        index += w.rms_att_weight.Length;
+        w.layers = new TransformerWeights.LayerWeights[n_layers];
 
-        w.wq = new float[n_layers * p.dim * p.n_heads * head_size];
-        Array.Copy (data, index, w.wq, 0, w.wq.Length);
-        index += w.wq.Length;
+        for (int l = 0; l < n_layers; l++) {
+            w.layers[l] = new TransformerWeights.LayerWeights {
+                rms_att_weight = new float[p.dim],
+                wq = new float[p.n_heads * head_size, p.dim],
+                wk = new float[p.n_kv_heads * kv_head_size, p.dim],
+                wv = new float[p.n_kv_heads * kv_head_size, p.dim],
+                wo = new float[p.dim, p.n_heads * head_size],
+                rms_ffn_weight = new float[p.dim],
+                w1 = new float[p.hidden_dim, p.dim],
+                w2 = new float[p.dim, p.hidden_dim],
+                w3 = new float[p.hidden_dim, p.dim]
+            };
+        }
 
-        w.wk = new float[n_layers * p.dim * p.n_kv_heads * head_size];
-        Array.Copy (data, index, w.wk, 0, w.wk.Length);
-        index += w.wk.Length;
+        // RMSNorm weights
+        for (int l = 0; l < n_layers; l++) {
+            for (int j = 0; j < p.dim; j++)
+                w.layers[l].rms_att_weight[j] = data[index++];
+        }
 
-        w.wv = new float[n_layers * p.dim * p.n_kv_heads * head_size];
-        Array.Copy (data, index, w.wv, 0, w.wv.Length);
-        index += w.wv.Length;
+        // wq weights
+        for (int l = 0; l < n_layers; l++) {
+            for (int i = 0; i < p.n_heads * head_size; i++) {
+                for (int j = 0; j < p.dim; j++)
+                    w.layers[l].wq[i, j] = data[index++];
+            }
+        }
 
-        w.wo = new float[n_layers * p.n_heads * head_size * p.dim];
-        Array.Copy (data, index, w.wo, 0, w.wo.Length);
-        index += w.wo.Length;
+        // wk weights
+        for (int l = 0; l < n_layers; l++) {
+            for (int i = 0; i < p.n_kv_heads * kv_head_size; i++) {
+                for (int j = 0; j < p.dim; j++)
+                    w.layers[l].wk[i, j] = data[index++];
+            }
+        }
 
-        w.rms_ffn_weight = new float[n_layers * p.dim];
-        Array.Copy (data, index, w.rms_ffn_weight, 0, w.rms_ffn_weight.Length);
-        index += w.rms_ffn_weight.Length;
+        // wv weights
+        for (int l = 0; l < n_layers; l++) {
+            for (int i = 0; i < p.n_kv_heads * kv_head_size; i++) {
+                for (int j = 0; j < p.dim; j++)
+                    w.layers[l].wv[i, j] = data[index++];
+            }
+        }
 
-        w.w1 = new float[n_layers * p.hidden_dim * p.dim];
-        Array.Copy (data, index, w.w1, 0, w.w1.Length);
-        index += w.w1.Length;
+        // wo weights
+        for (int l = 0; l < n_layers; l++) {
+            for (int i = 0; i < p.dim; i++) {
+                for (int j = 0; j < p.n_heads * head_size; j++)
+                    w.layers[l].wo[i, j] = data[index++];
+            }
+        }
 
-        w.w2 = new float[n_layers * p.dim * p.hidden_dim];
-        Array.Copy (data, index, w.w2, 0, w.w2.Length);
-        index += w.w2.Length;
+        // RMSNorm FFN weights
+        for (int l = 0; l < n_layers; l++) {
+            for (int j = 0; j < p.dim; j++)
+                w.layers[l].rms_ffn_weight[j] = data[index++];
+        }
 
-        w.w3 = new float[n_layers * p.hidden_dim * p.dim];
-        Array.Copy (data, index, w.w3, 0, w.w3.Length);
-        index += w.w3.Length;
+        // w1 weights
+        for (int l = 0; l < n_layers; l++) {
+            for (int i = 0; i < p.hidden_dim; i++) {
+                for (int j = 0; j < p.dim; j++)
+                    w.layers[l].w1[i, j] = data[index++];
+            }
+        }
 
+        // w2 weights
+        for (int l = 0; l < n_layers; l++) {
+            for (int i = 0; i < p.dim; i++) {
+                for (int j = 0; j < p.hidden_dim; j++)
+                    w.layers[l].w2[i, j] = data[index++];
+            }
+        }
+
+        // w3 weights
+        for (int l = 0; l < n_layers; l++) {
+            for (int i = 0; i < p.hidden_dim; i++) {
+                for (int j = 0; j < p.dim; j++)
+                    w.layers[l].w3[i, j] = data[index++];
+            }
+        }
+
+        // Final RMSNorm weights
         w.rms_final_weight = new float[p.dim];
-        Array.Copy (data, index, w.rms_final_weight, 0, w.rms_final_weight.Length);
-        index += w.rms_final_weight.Length;
+        for (int i = 0; i < p.dim; i++)
+            w.rms_final_weight[i] = data[index++];
 
         // Skip RoPE frequencies (not used in this implementation)
         index += p.seq_len * head_size / 2; // freq_cis_real
@@ -138,9 +218,12 @@ static class TransformerModel
         if (shared_weights != 0) {
             w.wcls = w.token_embedding_table;
         } else {
-            w.wcls = new float[p.vocab_size * p.dim];
-            Array.Copy (data, index, w.wcls, 0, w.wcls.Length);
-            index += w.wcls.Length;
+            w.wcls = new float[p.vocab_size][];
+            for (int i = 0; i < p.vocab_size; i++) {
+                w.wcls[i] = new float[p.dim];
+                for (int j = 0; j < p.dim; j++)
+                    w.wcls[i][j] = data[index++];
+            }
         }
     }
 
@@ -182,7 +265,7 @@ static class TransformerModel
         MallocRunState (t.state, t.config);
     }
 
-    static void RmsNorm (float[] o, float[] x, float[] weight, int weightOffset, int size) {
+    static void RmsNorm (float[] o, float[] x, float[] weight, int size) {
         // Calculate sum of squares
         float ss = 0.0f;
         for (int j = 0; j < size; j++) {
@@ -195,7 +278,7 @@ static class TransformerModel
 
         // Normalize and scale
         for (int j = 0; j < size; j++) {
-            o[j] = weight[weightOffset + j] * (ss * x[j]);
+            o[j] = weight[j] * (ss * x[j]);
         }
     }
 
@@ -221,18 +304,40 @@ static class TransformerModel
         }
     }
 
-    static void MatMul (float[] xout, float[] x, float[] w, int wOffset, int n, int d) {
-        // W (d,n) @ x (n,) -> xout (d,)
-
-        Parallel.For (0, d, i => {
+    /**
+     * W (m,n) @ x (n,) -> xout (m,)
+     */
+    static void MatMul (float[] xout, float[] x, float[][] W) {
+        Parallel.For (0, xout.Length, i => {
             float val = 0.0f;
-            var ptr = wOffset + i * n;
+            int n = x.Length;
+            var row = W[i];
 
             for (int j = 0; j < n; j++) {
-                val += w[ptr + j] * x[j];
+                val += row[j] * x[j];
             }
 
             xout[i] = val;
+        });
+    }
+
+    /**
+     * W (m,n) @ x (n,) -> xout (m,)
+     */
+    static unsafe void MatMul (float[] xout, float[] x, float[,] W) {
+        Parallel.For (0, xout.Length, i => {
+            int n = x.Length;
+
+            fixed (float* pW = W) {
+                float val = 0.0f;
+                float* pRowW = pW + i * n;
+
+                for (int j = 0; j < n; j++) {
+                    val += pRowW[j] * x[j];
+                }
+
+                xout[i] = val;
+            }
         });
     }
 
@@ -241,33 +346,27 @@ static class TransformerModel
         Config p = transformer.config;
         TransformerWeights w = transformer.weights;
         RunState s = transformer.state;
-        float[] x = s.x;
-        int dim = p.dim;
-        int kv_dim = (p.dim * p.n_kv_heads) / p.n_heads;
-        int kv_mul = p.n_heads / p.n_kv_heads;
-        int hidden_dim = p.hidden_dim;
-        int head_size = dim / p.n_heads;
+        int head_size = p.dim / p.n_heads;
+        int kv_head_size = head_size; // Assuming kv_head_size == head_size
 
         // Copy token embedding into x
-        Array.Copy (w.token_embedding_table, token * dim, x, 0, dim);
+        Array.Copy (w.token_embedding_table[token], 0, s.x, 0, p.dim);
 
         // Forward pass through layers
         for (int l = 0; l < p.n_layers; l++) {
-            // Attention rmsnorm
-            RmsNorm (s.xb, x, w.rms_att_weight, l * dim, dim);
+            var layer = w.layers[l];
+            var _cache = s.kv_cache[l];
 
-            // Key and value cache offsets
-            int loff = l * p.seq_len * kv_dim;
-            int kOffset = loff + pos * kv_dim;
-            int vOffset = loff + pos * kv_dim;
+            // Attention rmsnorm
+            RmsNorm (s.xb, s.x, layer.rms_att_weight, p.dim);
 
             // Compute q, k, v
-            MatMul (s.q, s.xb, w.wq, l * dim * p.n_heads * head_size, dim, p.n_heads * head_size);
-            MatMul (s.k, s.xb, w.wk, l * dim * p.n_kv_heads * head_size, dim, p.n_kv_heads * head_size);
-            MatMul (s.v, s.xb, w.wv, l * dim * p.n_kv_heads * head_size, dim, p.n_kv_heads * head_size);
+            MatMul (s.q, s.xb, layer.wq);
+            MatMul (s.k, s.xb, layer.wk);
+            MatMul (s.v, s.xb, layer.wv);
 
             // RoPE positional encoding
-            for (int i = 0; i < p.n_heads * head_size; i += 2) {
+            for (int i = 0; i < s.q.Length; i += 2) {
                 int head_dim = i % head_size;
                 float freq = 1.0f / MathF.Pow (10000.0f, head_dim / (float)head_size);
                 float val = pos * freq;
@@ -286,27 +385,26 @@ static class TransformerModel
             }
 
             // Store k and v in cache
-            Array.Copy (s.k, 0, s.key_cache, kOffset, kv_dim);
-            Array.Copy (s.v, 0, s.value_cache, vOffset, kv_dim);
+            Array.Copy (s.k, _cache.key_cache[pos], s.k.Length);
+            Array.Copy (s.v, _cache.value_cache[pos], s.v.Length);
 
             // Multihead attention
             for (int h = 0; h < p.n_heads; h++) {
-                int headOffset = h * head_size;
-
-                // Indices for q
-                int qStart = headOffset;
+                int q_offset = h * head_size;
+                int kv_h = h % p.n_kv_heads;
+                int k_offset = kv_h * kv_head_size;
 
                 // Initialize attention scores
                 float[] att = new float[pos + 1];
 
                 // Iterate over all timesteps
                 for (int t = 0; t <= pos; t++) {
-                    int kHeadOffset = loff + t * kv_dim + (h / kv_mul) * head_size;
+                    var _key = _cache.key_cache[t];
 
                     // Dot product between q and k
                     float score = 0.0f;
                     for (int i = 0; i < head_size; i++) {
-                        score += s.q[qStart + i] * s.key_cache[kHeadOffset + i];
+                        score += s.q[q_offset + i] * _key[k_offset + i];
                     }
 
                     score /= MathF.Sqrt (head_size);
@@ -317,32 +415,32 @@ static class TransformerModel
                 Softmax (att, pos + 1);
 
                 // Zero out s.xb for this head
-                Array.Fill (s.xb, 0, headOffset, head_size);
+                Array.Fill (s.xb, 0, q_offset, head_size);
 
                 for (int t = 0; t <= pos; t++) {
-                    int vHeadOffset = loff + t * kv_dim + (h / kv_mul) * head_size;
+                    var _value = _cache.value_cache[t];
 
                     float a = att[t];
                     for (int i = 0; i < head_size; i++) {
-                        s.xb[headOffset + i] += a * s.value_cache[vHeadOffset + i];
+                        s.xb[q_offset + i] += a * _value[k_offset + i];
                     }
                 }
             }
 
             // Final matmul
-            MatMul (s.xb2, s.xb, w.wo, l * p.n_heads * head_size * dim, p.n_heads * head_size, dim);
+            MatMul (s.xb2, s.xb, layer.wo);
 
             // Residual connection
-            for (int i = 0; i < dim; i++) {
-                x[i] += s.xb2[i];
+            for (int i = 0; i < p.dim; i++) {
+                s.x[i] += s.xb2[i];
             }
 
             // FFN rmsnorm
-            RmsNorm (s.xb, x, w.rms_ffn_weight, l * dim, dim);
+            RmsNorm (s.xb, s.x, layer.rms_ffn_weight, p.dim);
 
             // FFN computation
-            MatMul (s.hb, s.xb, w.w1, l * p.hidden_dim * dim, dim, p.hidden_dim);
-            MatMul (s.hb2, s.xb, w.w3, l * p.hidden_dim * dim, dim, p.hidden_dim);
+            MatMul (s.hb, s.xb, layer.w1);
+            MatMul (s.hb2, s.xb, layer.w3);
 
             // SwiGLU activation
             for (int i = 0; i < p.hidden_dim; i++) {
@@ -353,19 +451,20 @@ static class TransformerModel
             }
 
             // Final FFN matmul
-            MatMul (s.xb, s.hb, w.w2, l * dim * p.hidden_dim, p.hidden_dim, dim);
+            MatMul (s.xb, s.hb, layer.w2);
 
             // Residual connection
-            for (int i = 0; i < dim; i++) {
-                x[i] += s.xb[i];
+            for (int i = 0; i < p.dim; i++) {
+                s.x[i] += s.xb[i];
             }
         }
 
         // Final rmsnorm
-        RmsNorm (x, x, w.rms_final_weight, 0, dim);
+        RmsNorm (s.x, s.x, w.rms_final_weight, p.dim);
 
         // Classifier into logits
-        MatMul (s.logits, x, w.wcls, 0, p.dim, p.vocab_size);
+        MatMul (s.logits, s.x, w.wcls);
+
         return s.logits;
     }
 }
