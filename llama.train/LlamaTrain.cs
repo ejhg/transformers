@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using TorchSharp;
 using TorchSharp.Modules;
 using static TorchSharp.torch;
@@ -30,9 +31,9 @@ public class RMSNorm : nn.Module<Tensor, Tensor>
     }
 
     public override Tensor forward (Tensor x) {
-        Tensor _norm (Tensor x) => x * rsqrt (x.pow (2).mean ([-1], keepdim: true) + eps);
+        Tensor _norm (Tensor y) => y * rsqrt (y.pow (2).mean ([-1], keepdim: true) + eps);
 
-        var output = _norm (x.to_type (float32)).to_type (x.dtype);
+        var output = _norm (x.to_type (ScalarType.Float32)).to_type (x.dtype);
         return output * weight;
     }
 }
@@ -41,9 +42,9 @@ public static class Utilities
 {
     public static (Tensor, Tensor) PrecomputeFreqsCis (int dim, int end, float theta = 10000.0f) {
         var arange = torch.arange (0, dim, 2);
-        var freqs = 1.0 / pow (theta, arange[..(dim / 2)].to_type (float32) / dim);
+        var freqs = 1.0 / pow (theta, arange[..(dim / 2)].to_type (ScalarType.Float32) / dim);
         var t = torch.arange (end, device: freqs.device);
-        freqs = outer (t, freqs).to_type (float32);
+        freqs = outer (t, freqs).to_type (ScalarType.Float32);
         var freqs_cos = cos (freqs);
         var freqs_sin = sin (freqs);
         return (freqs_cos, freqs_sin);
@@ -67,8 +68,8 @@ public static class Utilities
         var xqShape = xq.shape;
         var xkShape = xk.shape;
 
-        var xqFloat = xq.to_type (float32);
-        var xkFloat = xk.to_type (float32);
+        var xqFloat = xq.to_type (ScalarType.Float32);
+        var xkFloat = xk.to_type (ScalarType.Float32);
 
         var xqReshaped = xqFloat.reshape (xqShape[..^1].Concat (new long[] {
             -1,
@@ -165,7 +166,7 @@ public class Attention : nn.Module
                 1,
                 args.MaxSeqLen,
                 args.MaxSeqLen
-            }, float.NegativeInfinity);
+            }, float.NegativeInfinity, device: wq.weight.device);
             mask = triu (mask, diagonal: 1);
         }
 
@@ -193,7 +194,7 @@ public class Attention : nn.Module
         var maskSlice = mask.slice (2, 0, seqlen, 1).slice (3, 0, seqlen, 1);
         scores = scores + maskSlice;
 
-        scores = nn.functional.softmax (scores.to_type (float32), dim: -1).to_type (xq.dtype);
+        scores = nn.functional.softmax (scores.to_type (ScalarType.Float32), dim: -1).to_type (xq.dtype);
         scores = attnDropout.forward (scores);
 
         var output = matmul (scores, xv);
@@ -330,11 +331,11 @@ public class Transformer : nn.Module
         h = norm.forward (h);
 
         Tensor logits;
-        if (!ReferenceEquals(targets,null)) {
+        if (targets is not null) {
             logits = output.forward (h);
             LastLoss = nn.functional.cross_entropy (logits.view (-1, logits.shape[^1]), targets.view (-1), ignore_index: -1);
         } else {
-            logits = output.forward (h.index_select (1, tensor (new long[] { seqlen - 1 })));
+            logits = output.forward (h.index_select (1, tensor (new long[] { seqlen - 1 }, device: tokens.device)));
             LastLoss = null;
         }
 
@@ -348,6 +349,13 @@ public class Transformer : nn.Module
         var decayParams = paramDict.Where (kv => kv.Value.dim () >= 2).Select (kv => kv.Value).ToList ();
         var nodecayParams = paramDict.Where (kv => kv.Value.dim () < 2).Select (kv => kv.Value).ToList ();
 
+        // Logging
+        var numDecayParams = decayParams.Sum (p => p.numel ());
+        var numNodecayParams = nodecayParams.Sum (p => p.numel ());
+        Console.WriteLine ($"num decayed parameter tensors: {decayParams.Count}, with {numDecayParams:N0} parameters");
+        Console.WriteLine ($"num non-decayed parameter tensors: {nodecayParams.Count}, with {numNodecayParams:N0} parameters");
+
+        // Create optimizer parameter groups
         var optimGroups = new List<Dictionary<string, object>> {
             new Dictionary<string, object> {
                 { "params", decayParams },
@@ -359,10 +367,8 @@ public class Transformer : nn.Module
             }
         };
 
-        // TODO map optimGropus into AdamW
-
         // TorchSharp does not support fused optimizers yet
-        var optimizer = optim.AdamW (new List<(string name, Parameter parameter)> (), lr: learningRate, beta1:betas.Item1, beta2: betas.Item2);
+        var optimizer = optim.AdamW (optimGroups, learningRate, beta1: betas.Item1, beta2: betas.Item2);
 
         Console.WriteLine ($"Using fused AdamW: False");
         return optimizer;
@@ -383,6 +389,56 @@ public class Transformer : nn.Module
         var mfu = flopsAchieved / flopsPromised;
         return mfu;
     }
+
+    public Tensor Generate (Tensor idx, int maxNewTokens, double temperature = 1.0, int? topK = null) {
+        this.eval (); // Ensure the model is in evaluation mode
+
+        for (int i = 0; i < maxNewTokens; i++) {
+            // If the sequence context is too long, crop it at max_seq_len
+            Tensor idx_cond;
+            if (idx.shape[1] <= args.MaxSeqLen) {
+                idx_cond = idx;
+            } else {
+                idx_cond = idx.index (new TensorIndex[] {
+                    TensorIndex.Ellipsis,
+                    TensorIndex.Slice (idx.shape[1] - args.MaxSeqLen, idx.shape[1])
+                });
+            }
+
+            // Forward pass
+            Tensor logits = this.Forward (idx_cond);
+            logits = logits.index_select (1, tensor (idx_cond.shape[1] - 1, device: idx.device)); // Get logits at last time step
+            logits = logits.squeeze (1); // Remove time dimension if necessary
+
+            Tensor idx_next;
+            if (temperature == 0.0) {
+                // Sample the single most likely index
+                var topk = logits.topk (1, dim: -1);
+                idx_next = topk.indices;
+            } else {
+                logits = logits / temperature;
+                if (topK.HasValue) {
+                    var topk = logits.topk (Math.Min (topK.Value, (int)logits.shape[^1]), dim: -1);
+                    var v = topk.values;
+                    var threshold = v.index_select (1, tensor (topk.values.shape[1] - 1, device: logits.device));
+                    logits = torch.where (logits < threshold, full_like (logits, double.NegativeInfinity), logits);
+                }
+
+                // Apply softmax to convert logits to probabilities
+                var probs = nn.functional.softmax (logits, dim: -1);
+                // Sample from the distribution
+                idx_next = probs.multinomial (1);
+            }
+
+            // Append sampled index to the running sequence
+            idx = torch.cat (new Tensor[] {
+                idx,
+                idx_next
+            }, dim: 1);
+        }
+
+        return idx;
+    }
 }
 
 class Program
@@ -391,13 +447,13 @@ class Program
         // Hyperparameters and configurations
         string outDir = "out";
         int evalInterval = 2000;
-        int logInterval = 10;
+        int logInterval = 1;
         int evalIters = 100;
         bool evalOnly = false;
         bool alwaysSaveCheckpoint = false;
         string initFrom = "scratch"; // "scratch" or "resume"
 
-        int batchSize = 4; // Reduced for demonstration
+        int batchSize = 128;
         int maxSeqLen = 256;
         string vocabSource = "llama2"; // "llama2" or "custom"
         int vocabSize = 32000;
@@ -411,14 +467,16 @@ class Program
 
         int gradientAccumulationSteps = 4;
         double learningRate = 5e-4;
-        int maxIters = 1000; // Reduced for demonstration
+        int maxIters = 100000;
         double weightDecay = 1e-1;
         double beta1 = 0.9;
         double beta2 = 0.95;
         double gradClip = 1.0;
 
         bool decayLr = true;
-        int warmupIters = 100;
+        int warmupIters = 1000;
+        int lrDecayIters = maxIters;
+        double minLr = 0.0;
 
         string device = cuda.is_available () ? "cuda" : "cpu";
         string dtype = "float32"; // TorchSharp supports float32 and float64
@@ -460,23 +518,21 @@ class Program
         // Optimizer
         var optimizer = model.ConfigureOptimizers (weightDecay, learningRate, (beta1, beta2), device);
 
-        // Loss function
-        var criterion = nn.CrossEntropyLoss (ignore_index: -1);
-
         // Training loop
         int iterNum = 0;
+        int localIterNum = 0;
         double bestValLoss = double.MaxValue;
+        double runningMfu = -1.0;
 
         // Data loader (using synthetic data for demonstration)
-        var trainData = GenerateSyntheticData (10000, batchSize, maxSeqLen, vocabSize, deviceType);
-        var valData = GenerateSyntheticData (1000, batchSize, maxSeqLen, vocabSize, deviceType);
+        var trainData = GenerateSyntheticData (100000, batchSize, maxSeqLen, vocabSize, deviceType).GetEnumerator ();
+        var valData = GenerateSyntheticData (10000, batchSize, maxSeqLen, vocabSize, deviceType).GetEnumerator ();
 
-        var trainDataLoader = trainData.GetEnumerator ();
-        var valDataLoader = valData.GetEnumerator ();
+        // For timing
+        var t0 = Stopwatch.GetTimestamp ();
+        var stopwatch = Stopwatch.StartNew ();
 
-        // Training loop
         Console.WriteLine ("Starting training loop...");
-        var stopwatch = System.Diagnostics.Stopwatch.StartNew ();
         while (iterNum <= maxIters) {
             model.train ();
 
@@ -484,12 +540,12 @@ class Program
 
             double runningLoss = 0.0;
             for (int accStep = 0; accStep < gradientAccumulationSteps; accStep++) {
-                if (!trainDataLoader.MoveNext ()) {
-                    trainDataLoader = trainData.GetEnumerator ();
-                    trainDataLoader.MoveNext ();
+                if (!trainData.MoveNext ()) {
+                    trainData = GenerateSyntheticData (100000, batchSize, maxSeqLen, vocabSize, deviceType).GetEnumerator ();
+                    trainData.MoveNext ();
                 }
 
-                var (X, Y) = trainDataLoader.Current;
+                var (X, Y) = trainData.Current;
 
                 X = X.to (deviceType);
                 Y = Y.to (deviceType);
@@ -508,9 +564,25 @@ class Program
 
             optimizer.step ();
 
+            // Timing and logging
+            var t1 = Stopwatch.GetTimestamp ();
+            var dt = (t1 - t0) / (double)Stopwatch.Frequency;
+            t0 = t1;
+
             if (iterNum % logInterval == 0) {
-                Console.WriteLine ($"Iteration {iterNum}: Loss = {runningLoss}");
+                var lossf = runningLoss * gradientAccumulationSteps;
+                if (localIterNum >= 5) {
+                    var mfu = model.EstimateMfu (batchSize * gradientAccumulationSteps, dt);
+                    runningMfu = runningMfu == -1.0 ? mfu : 0.9 * runningMfu + 0.1 * mfu;
+                } else {
+                    runningMfu = -1.0;
+                }
+
+                Console.WriteLine ($"{iterNum} | loss {runningLoss:F4} | lr {learningRate:E} | {dt * 1000:F2}ms | mfu {runningMfu * 100:F2}%");
             }
+
+            localIterNum++;
+            iterNum++;
 
             // Evaluation
             if (iterNum % evalInterval == 0 && iterNum > 0) {
@@ -518,19 +590,21 @@ class Program
                 double valLoss = 0.0;
                 int valSteps = 0;
 
-                foreach (var _ in valData) {
-                    var X_val = _.Item1.to (deviceType);
-                    var Y_val = _.Item2.to (deviceType);
+                using (torch.no_grad ()) {
+                    valData = GenerateSyntheticData (10000, batchSize, maxSeqLen, vocabSize, deviceType).GetEnumerator ();
+                    while (valData.MoveNext ()) {
+                        var (X_val, Y_val) = valData.Current;
+                        X_val = X_val.to (deviceType);
+                        Y_val = Y_val.to (deviceType);
 
-                    using (no_grad ()) {
                         var logits = model.Forward (X_val, Y_val);
                         var loss = model.LastLoss;
                         valLoss += loss.item<double> ();
-                    }
 
-                    valSteps++;
-                    if (valSteps >= evalIters)
-                        break;
+                        valSteps++;
+                        if (valSteps >= evalIters)
+                            break;
+                    }
                 }
 
                 valLoss /= valSteps;
@@ -546,13 +620,21 @@ class Program
                 model.train ();
             }
 
-            iterNum++;
+            // Learning rate scheduling
+            if (decayLr) {
+                double lr;
+                if (iterNum < warmupIters) {
+                    lr = learningRate * iterNum / warmupIters;
+                } else if (iterNum > lrDecayIters) {
+                    lr = minLr;
+                } else {
+                    var decayRatio = (double)(iterNum - warmupIters) / (lrDecayIters - warmupIters);
+                    var coeff = 0.5 * (1.0 + Math.Cos (Math.PI * decayRatio));
+                    lr = minLr + coeff * (learningRate - minLr);
+                }
 
-            // Learning rate scheduling (simplified)
-            if (decayLr && iterNum < warmupIters) {
-                var lrScale = (double)iterNum / warmupIters;
                 foreach (var paramGroup in optimizer.ParamGroups) {
-                    paramGroup.LearningRate = learningRate * lrScale;
+                    paramGroup.LearningRate = lr;
                 }
             }
         }
@@ -563,7 +645,6 @@ class Program
 
     // Generate synthetic data for demonstration purposes
     static IEnumerable<(Tensor, Tensor)> GenerateSyntheticData (int totalSamples, int batchSize, int seqLen, int vocabSize, Device device) {
-        var random = new Random ();
         int samplesGenerated = 0;
         while (samplesGenerated < totalSamples) {
             int currentBatchSize = Math.Min (batchSize, totalSamples - samplesGenerated);
