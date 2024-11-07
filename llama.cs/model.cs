@@ -83,6 +83,8 @@ namespace llama.cs
             s.hb = new float[p.hidden_dim];
             s.hb2 = new float[p.hidden_dim];
             s.q = new float[p.dim];
+            s.k = new float[p.dim];
+            s.v = new float[p.dim];
             s.att = new float[p.n_heads * p.seq_len];
             s.logits = new float[p.vocab_size];
             s.key_cache = new float[p.n_layers * p.seq_len * kv_dim];
@@ -230,6 +232,7 @@ namespace llama.cs
         }
 
         public static void MatMul (float[] xout, float[] x, float[] w, int wOffset, int n, int d) {
+            // W (d,n) @ x (n,) -> xout (d,)
             Parallel.For (0, d, i => {
                 float val = 0.0f;
                 for (int j = 0; j < n; j++) {
@@ -262,35 +265,49 @@ namespace llama.cs
 
                 // Key and value cache offsets
                 int loff = l * p.seq_len * kv_dim;
+                int kOffset = loff + pos * kv_dim;
+                int vOffset = loff + pos * kv_dim;
 
-                // Store k and v in cache
-                s.k = s.key_cache;
-                s.v = s.value_cache;
-
-                // QKV matmuls
+                // Compute q, k, v
                 MatMul (s.q, s.xb, w.wq, l * dim * p.n_heads * head_size, dim, p.n_heads * head_size);
                 MatMul (s.k, s.xb, w.wk, l * dim * p.n_kv_heads * head_size, dim, p.n_kv_heads * head_size);
                 MatMul (s.v, s.xb, w.wv, l * dim * p.n_kv_heads * head_size, dim, p.n_kv_heads * head_size);
 
-                // RoPE positional encoding (simplified for brevity)
-                // In a full implementation, apply rotation to q and k based on position
+                // RoPE positional encoding
+                for (int i = 0; i < p.n_heads * head_size; i += 2) {
+                    int head_dim = i % head_size;
+                    float freq = 1.0f / (float)Math.Pow (10000.0, head_dim / (float)head_size);
+                    float val = pos * freq;
+                    float fcr = (float)Math.Cos (val);
+                    float fci = (float)Math.Sin (val);
+                    int rotn = i < p.n_kv_heads * head_size ? 2 : 1; // Rotate q and k
+                    for (int v = 0; v < rotn; v++) {
+                        float[] vec = v == 0 ? s.q : s.k;
+                        float v0 = vec[i];
+                        float v1 = vec[i + 1];
+                        vec[i] = v0 * fcr - v1 * fci;
+                        vec[i + 1] = v0 * fci + v1 * fcr;
+                    }
+                }
+
+                // Store k and v in cache
+                Array.Copy (s.k, 0, s.key_cache, kOffset, kv_dim);
+                Array.Copy (s.v, 0, s.value_cache, vOffset, kv_dim);
 
                 // Multihead attention
                 int h;
                 Parallel.For (0, p.n_heads, h => {
-                    // Get the query vector for this head
-                    int qOffset = h * head_size;
+                    int headOffset = h * head_size;
                     float[] q = new float[head_size];
-                    Array.Copy (s.q, qOffset, q, 0, head_size);
+                    Array.Copy (s.q, headOffset, q, 0, head_size);
 
-                    // Attention scores for this head
+                    // Attention scores
                     float[] att = new float[pos + 1];
 
-                    // Iterate over all timesteps
                     for (int t = 0; t <= pos; t++) {
-                        int kHeadOffset = t * kv_dim + (h / kv_mul) * head_size;
+                        int kHeadOffset = loff + t * kv_dim + (h / kv_mul) * head_size;
                         float[] k = new float[head_size];
-                        Array.Copy (s.key_cache, loff + kHeadOffset, k, 0, head_size);
+                        Array.Copy (s.key_cache, kHeadOffset, k, 0, head_size);
 
                         // Dot product between q and k
                         float score = 0.0f;
@@ -306,21 +323,20 @@ namespace llama.cs
                     Softmax (att, pos + 1);
 
                     // Weighted sum of the values
-                    int xbOffset = h * head_size;
-                    for (int i = 0; i < head_size; i++) {
-                        s.xb[xbOffset + i] = 0.0f;
-                    }
-
+                    float[] xb = new float[head_size];
                     for (int t = 0; t <= pos; t++) {
-                        int vHeadOffset = t * kv_dim + (h / kv_mul) * head_size;
+                        int vHeadOffset = loff + t * kv_dim + (h / kv_mul) * head_size;
                         float[] v = new float[head_size];
-                        Array.Copy (s.value_cache, loff + vHeadOffset, v, 0, head_size);
+                        Array.Copy (s.value_cache, vHeadOffset, v, 0, head_size);
 
                         float a = att[t];
                         for (int i = 0; i < head_size; i++) {
-                            s.xb[xbOffset + i] += a * v[i];
+                            xb[i] += a * v[i];
                         }
                     }
+
+                    // Store in xb
+                    Array.Copy (xb, 0, s.xb, headOffset, head_size);
                 });
 
                 // Final matmul
@@ -335,11 +351,11 @@ namespace llama.cs
                 RmsNorm (s.xb, x, w.rms_ffn_weight, l * dim, dim);
 
                 // FFN computation
-                MatMul (s.hb, s.xb, w.w1, l * hidden_dim * dim, dim, hidden_dim);
-                MatMul (s.hb2, s.xb, w.w3, l * hidden_dim * dim, dim, hidden_dim);
+                MatMul (s.hb, s.xb, w.w1, l * p.hidden_dim * dim, dim, p.hidden_dim);
+                MatMul (s.hb2, s.xb, w.w3, l * p.hidden_dim * dim, dim, p.hidden_dim);
 
                 // SwiGLU activation
-                for (int i = 0; i < hidden_dim; i++) {
+                for (int i = 0; i < p.hidden_dim; i++) {
                     float val = s.hb[i];
                     val *= 1.0f / (1.0f + (float)Math.Exp (-val)); // SiLU activation
                     val *= s.hb2[i];
@@ -347,7 +363,7 @@ namespace llama.cs
                 }
 
                 // Final FFN matmul
-                MatMul (s.xb, s.hb, w.w2, l * dim * hidden_dim, hidden_dim, dim);
+                MatMul (s.xb, s.hb, w.w2, l * dim * p.hidden_dim, p.hidden_dim, dim);
 
                 // Residual connection
                 for (int i = 0; i < dim; i++) {
@@ -384,7 +400,7 @@ namespace llama.cs
         public TokenIndex[] sorted_vocab;
         public int vocab_size;
         public uint max_token_length;
-        public string[] byte_pieces = new string[256];
+        public string[] byte_pieces = new string[512];
 
         public void BuildTokenizer (string tokenizer_path, int vocab_size) {
             this.vocab_size = vocab_size;
@@ -394,7 +410,8 @@ namespace llama.cs
 
             // Initialize byte pieces
             for (int i = 0; i < 256; i++) {
-                byte_pieces[i] = Encoding.UTF8.GetString (new byte[] { (byte)i });
+                byte_pieces[i * 2] = ((char)i).ToString ();
+                byte_pieces[i * 2 + 1] = '\0'.ToString ();
             }
 
             using (FileStream fs = new FileStream (tokenizer_path, FileMode.Open, FileAccess.Read))
@@ -416,10 +433,11 @@ namespace llama.cs
                 piece = piece.Substring (1);
             }
 
-            if (piece.StartsWith ("<0x") && piece.EndsWith (">") && piece.Length == 6) {
-                string hex = piece.Substring (3, 2);
-                byte byte_val = Convert.ToByte (hex, 16);
-                piece = byte_pieces[byte_val];
+            if (piece.StartsWith ("<0x") && piece.EndsWith (">")) {
+                string hex = piece.Substring (3, piece.Length - 4);
+                if (byte.TryParse (hex, System.Globalization.NumberStyles.HexNumber, null, out byte byte_val)) {
+                    piece = ((char)byte_val).ToString ();
+                }
             }
 
             return piece;
