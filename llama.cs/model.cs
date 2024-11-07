@@ -370,9 +370,6 @@ static class TransformerModel
     }
 }
 
-// ----------------------------------------------------------------------------
-// The Byte Pair Encoding (BPE) Tokenizer that translates strings <-> tokens
-
 public class TokenIndex : IComparable<TokenIndex>
 {
     public string str;
@@ -383,6 +380,9 @@ public class TokenIndex : IComparable<TokenIndex>
     }
 }
 
+/**
+ * The Byte Pair Encoding (BPE) Tokenizer that translates strings <-> tokens
+ */
 public class Tokenizer
 {
     public string[] vocab;
@@ -555,9 +555,6 @@ public class Tokenizer
     }
 }
 
-// ----------------------------------------------------------------------------
-// The Sampler, which takes logits and returns a sampled token
-
 public class ProbIndex : IComparable<ProbIndex>
 {
     public float prob;
@@ -568,6 +565,9 @@ public class ProbIndex : IComparable<ProbIndex>
     }
 }
 
+/**
+ * The Sampler, which takes logits and returns a sampled token
+ */
 public class Sampler
 {
     public ProbIndex[] probindex;
@@ -667,24 +667,6 @@ public class Sampler
     }
 }
 
-// ----------------------------------------------------------------------------
-// Utilities: time measurement
-
-static class Utils
-{
-    public static long TimeInMs () {
-        return DateTimeOffset.Now.ToUnixTimeMilliseconds ();
-    }
-
-    public static void ReadStdin (string guide, out string buffer) {
-        Console.Write (guide);
-        buffer = Console.ReadLine ();
-    }
-}
-
-// ----------------------------------------------------------------------------
-// Generation loop
-
 public class Generator
 {
     public static void Generate (Transformer transformer, Tokenizer tokenizer, Sampler sampler, string prompt, int steps) {
@@ -722,15 +704,19 @@ public class Generator
             tokenizer.SafePrint (piece);
             token = next;
 
-            if (start == 0) start = Utils.TimeInMs ();
+            if (start == 0) start = TimeInMs ();
         }
 
         Console.WriteLine ();
 
         if (pos > 1) {
-            long end = Utils.TimeInMs ();
+            long end = TimeInMs ();
             Console.Error.WriteLine ($"Achieved tok/s: {(pos - 1) / ((end - start) / 1000.0)}");
         }
+    }
+
+    static long TimeInMs () {
+        return DateTimeOffset.Now.ToUnixTimeMilliseconds ();
     }
 
     public static void Chat (Transformer transformer, Tokenizer tokenizer, Sampler sampler, string cli_user_prompt, string cli_system_prompt, int steps) {
@@ -753,7 +739,7 @@ public class Generator
                 if (pos == 0) {
                     if (cli_system_prompt == null) {
                         // System prompt not provided, read from stdin
-                        Utils.ReadStdin ("Enter system prompt (optional): ", out system_prompt);
+                        ReadStdin ("Enter system prompt (optional): ", out system_prompt);
                     } else {
                         system_prompt = cli_system_prompt;
                     }
@@ -763,7 +749,7 @@ public class Generator
                 if (pos == 0 && cli_user_prompt != null) {
                     user_prompt = cli_user_prompt;
                 } else {
-                    Utils.ReadStdin ("User: ", out user_prompt);
+                    ReadStdin ("User: ", out user_prompt);
                 }
 
                 // Render prompts into the Llama 2 Chat schema
@@ -811,10 +797,12 @@ public class Generator
 
         Console.WriteLine ();
     }
-}
 
-// ----------------------------------------------------------------------------
-// Main CLI program
+    static void ReadStdin (string guide, out string buffer) {
+        Console.Write (guide);
+        buffer = Console.ReadLine ();
+    }
+}
 
 class Program
 {
