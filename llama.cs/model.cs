@@ -77,20 +77,11 @@ public class Transformer
 
 static class TransformerModel
 {
-    static void MallocRunState (RunState s, Config p) {
+    static RunState createRunState (Config p) {
         int head_size = p.dim / p.n_heads;
         int kv_head_size = head_size; // Assuming kv_head_size == head_size
-        s.x = new float[p.dim];
-        s.xb = new float[p.dim];
-        s.xb2 = new float[p.dim];
-        s.hb = new float[p.hidden_dim];
-        s.hb2 = new float[p.hidden_dim];
-        s.q = new float[p.n_heads * head_size];
-        s.k = new float[p.n_kv_heads * kv_head_size];
-        s.v = new float[p.n_kv_heads * kv_head_size];
-        s.logits = new float[p.vocab_size];
 
-        s.kv_cache = Enumerable
+        var kv_cache = Enumerable
             .Range (0, p.n_layers)
             .Select (_ => {
                 var _cache = new RunState.LayerCache {
@@ -105,13 +96,28 @@ static class TransformerModel
 
                 return _cache;
             }).ToArray ();
+
+        return new RunState {
+            x = new float[p.dim],
+            xb = new float[p.dim],
+            xb2 = new float[p.dim],
+            hb = new float[p.hidden_dim],
+            hb2 = new float[p.hidden_dim],
+            q = new float[p.n_heads * head_size],
+            k = new float[p.n_kv_heads * kv_head_size],
+            v = new float[p.n_kv_heads * kv_head_size],
+            logits = new float[p.vocab_size],
+            kv_cache = kv_cache,
+        };
     }
 
-    static void MemoryMapWeights (TransformerWeights w, Config p, float[] data, int shared_weights) {
+    static TransformerWeights MemoryMapWeights (Config p, float[] data, int shared_weights) {
         int head_size = p.dim / p.n_heads;
         int kv_head_size = head_size; // Assuming kv_head_size == head_size
         int n_layers = p.n_layers;
         long index = 0;
+
+        TransformerWeights w = new TransformerWeights ();
 
         // Token embedding table
         w.token_embedding_table = new float[p.vocab_size][];
@@ -225,60 +231,63 @@ static class TransformerModel
                     w.wcls[i][j] = data[index++];
             }
         }
+
+        return w;
     }
 
-    static void ReadCheckpoint (string checkpoint, Config config, TransformerWeights weights, out float[] data, out long file_size) {
+    static (Config config, TransformerWeights weights) ReadCheckpoint (string checkpoint) {
         using FileStream fs = new FileStream (checkpoint, FileMode.Open, FileAccess.Read);
         using BinaryReader br = new BinaryReader (fs);
 
-        // Read config
-        config.dim = br.ReadInt32 ();
-        config.hidden_dim = br.ReadInt32 ();
-        config.n_layers = br.ReadInt32 ();
-        config.n_heads = br.ReadInt32 ();
-        config.n_kv_heads = br.ReadInt32 ();
-        config.vocab_size = br.ReadInt32 ();
-        config.seq_len = br.ReadInt32 ();
+        var config = new Config {
+            dim = br.ReadInt32 (),
+            hidden_dim = br.ReadInt32 (),
+            n_layers = br.ReadInt32 (),
+            n_heads = br.ReadInt32 (),
+            n_kv_heads = br.ReadInt32 (),
+            vocab_size = br.ReadInt32 (),
+            seq_len = br.ReadInt32 ()
+        };
 
         int shared_weights = config.vocab_size > 0 ? 1 : 0;
         config.vocab_size = Math.Abs (config.vocab_size);
 
-        file_size = fs.Length;
+        var file_size = fs.Length;
 
         // Read data
         int dataSize = (int)((file_size - 7 * sizeof(int)) / sizeof(float)); // 7 ints in Config
-        data = new float[dataSize];
+        var data = new float[dataSize];
         for (int i = 0; i < dataSize; i++) {
             data[i] = br.ReadSingle ();
         }
 
         // Map weights
-        MemoryMapWeights (weights, config, data, shared_weights);
+        var weights = MemoryMapWeights (config, data, shared_weights);
+
+        return (config, weights);
     }
 
-    public static void BuildTransformer (Transformer t, string checkpoint_path) {
-        t.config = new Config ();
-        t.weights = new TransformerWeights ();
-        t.state = new RunState ();
-
-        ReadCheckpoint (checkpoint_path, t.config, t.weights, out _, out _);
-        MallocRunState (t.state, t.config);
+    public static Transformer load (string checkpoint_path) {
+        var t = new Transformer ();
+        (t.config, t.weights) = ReadCheckpoint (checkpoint_path);
+        t.state = createRunState (t.config);
+        return t;
     }
 
-    static void RmsNorm (float[] o, float[] x, float[] weight, int size) {
+    static void RmsNorm (float[] o, float[] x, float[] weight) {
+        var size = x.Length;
+
         // Calculate sum of squares
-        float ss = 0.0f;
+        float sumOfSquaresOfX = 0.0f;
         for (int j = 0; j < size; j++) {
-            ss += x[j] * x[j];
+            sumOfSquaresOfX += x[j] * x[j];
         }
 
-        ss /= size;
-        ss += 1e-5f;
-        ss = 1.0f / MathF.Sqrt (ss);
+        var scaleX = 1.0f / MathF.Sqrt (sumOfSquaresOfX / size + 1e-5f);
 
         // Normalize and scale
         for (int j = 0; j < size; j++) {
-            o[j] = weight[j] * (ss * x[j]);
+            o[j] = weight[j] * (scaleX * x[j]);
         }
     }
 
@@ -358,7 +367,7 @@ static class TransformerModel
             var _cache = s.kv_cache[l];
 
             // Attention rmsnorm
-            RmsNorm (s.xb, s.x, layer.rms_att_weight, p.dim);
+            RmsNorm (s.xb, s.x, layer.rms_att_weight);
 
             // Compute q, k, v
             MatMul (s.q, s.xb, layer.wq);
@@ -436,7 +445,7 @@ static class TransformerModel
             }
 
             // FFN rmsnorm
-            RmsNorm (s.xb, s.x, layer.rms_ffn_weight, p.dim);
+            RmsNorm (s.xb, s.x, layer.rms_ffn_weight);
 
             // FFN computation
             MatMul (s.hb, s.xb, layer.w1);
@@ -460,7 +469,7 @@ static class TransformerModel
         }
 
         // Final rmsnorm
-        RmsNorm (s.x, s.x, w.rms_final_weight, p.dim);
+        RmsNorm (s.x, s.x, w.rms_final_weight);
 
         // Classifier into logits
         MatMul (s.logits, s.x, w.wcls);
@@ -818,7 +827,8 @@ public class Generator
         return DateTimeOffset.Now.ToUnixTimeMilliseconds ();
     }
 
-    public static void Chat (Transformer transformer, Tokenizer tokenizer, Sampler sampler, string cli_user_prompt, string cli_system_prompt, int steps) {
+    public static void Chat (Transformer transformer, Tokenizer tokenizer, Sampler sampler, string cli_user_prompt, string cli_system_prompt,
+        int steps) {
         // Buffers for prompts
         string system_prompt = "";
         string user_prompt = "";
@@ -981,8 +991,8 @@ class Program
         if (steps < 0) steps = 0;
 
         // Build the Transformer via the model .bin file
-        Transformer transformer = new Transformer ();
-        TransformerModel.BuildTransformer (transformer, checkpoint_path);
+        var transformer = TransformerModel.load (checkpoint_path);
+
         if (steps == 0 || steps > transformer.config.seq_len) {
             steps = transformer.config.seq_len;
         }
