@@ -621,34 +621,21 @@ public class Tokenizer
     }
 }
 
-public class ProbIndex : IComparable<ProbIndex>
-{
-    public float prob;
-    public int index;
-
-    public int CompareTo (ProbIndex other) {
-        return other.prob.CompareTo (prob);
-    }
-}
-
 /**
  * The Sampler, which takes logits and returns a sampled token
  */
 public class Sampler
 {
-    public ProbIndex[] probindex;
+    int vocab_size;
     public float temperature;
     public float topp;
     public Random rng;
 
     public Sampler (int vocab_size, float temperature, float topp, int rng_seed) {
+        this.vocab_size = vocab_size;
         this.temperature = temperature;
         this.topp = topp;
         rng = new Random (rng_seed);
-        probindex = new ProbIndex[vocab_size];
-        for (int i = 0; i < vocab_size; i++) {
-            probindex[i] = new ProbIndex ();
-        }
     }
 
     public int SampleArgMax (float[] probabilities) {
@@ -682,6 +669,8 @@ public class Sampler
         int n0 = 0;
         float cutoff = (1.0f - topp) / (probabilities.Length - 1);
 
+        var probindex = new (float prob, int index)[vocab_size];
+
         for (int i = 0; i < probabilities.Length; i++) {
             if (probabilities[i] >= cutoff) {
                 probindex[n0].index = i;
@@ -690,12 +679,15 @@ public class Sampler
             }
         }
 
-        Array.Sort (probindex, 0, n0);
+        var sorted = probindex
+            .Take (n0)
+            .OrderByDescending (_ => _.prob)
+            .ToArray ();
 
         float cumulative_prob = 0.0f;
         int last_idx = n0 - 1;
         for (int i = 0; i < n0; i++) {
-            cumulative_prob += probindex[i].prob;
+            cumulative_prob += sorted[i].prob;
             if (cumulative_prob > topp) {
                 last_idx = i;
                 break;
@@ -705,13 +697,13 @@ public class Sampler
         float r = coin * cumulative_prob;
         float cdf = 0.0f;
         for (int i = 0; i <= last_idx; i++) {
-            cdf += probindex[i].prob;
+            cdf += sorted[i].prob;
             if (r < cdf) {
-                return probindex[i].index;
+                return sorted[i].index;
             }
         }
 
-        return probindex[last_idx].index;
+        return sorted[last_idx].index;
     }
 
     public int Sample (float[] logits) {
