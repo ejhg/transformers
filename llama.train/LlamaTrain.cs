@@ -2,6 +2,8 @@ using System.Diagnostics;
 using TorchSharp;
 using TorchSharp.Modules;
 using static TorchSharp.torch;
+using static TorchSharp.torch.nn;
+using static TorchSharp.torch.optim;
 
 namespace llamatrain;
 
@@ -19,12 +21,12 @@ public class ModelArgs
     public float Dropout { get; set; } = 0.0f;
 }
 
-public class RMSNorm : nn.Module<Tensor, Tensor>
+public class RMSNorm : Module<Tensor, Tensor>
 {
-    private float eps;
-    private Parameter weight;
+    private readonly float eps;
+    private readonly Parameter weight;
 
-    public RMSNorm (int dim, float eps) : base (nameof(RMSNorm)) {
+    public RMSNorm (int dim, float eps) : base ("RMSNorm") {
         this.eps = eps;
         this.weight = nn.Parameter (ones (dim));
         RegisterComponents ();
@@ -124,20 +126,20 @@ public static class Utilities
     }
 }
 
-public class Attention : nn.Module
+public class Attention : Module
 {
-    private int nKvHeads;
-    private int nLocalHeads;
-    private int nLocalKvHeads;
-    private int nRep;
-    private int headDim;
-    private Linear wq, wk, wv, wo;
-    private Dropout attnDropout, residDropout;
-    private float dropout;
-    private bool flash;
-    private Tensor mask;
+    private readonly int nKvHeads;
+    private readonly int nLocalHeads;
+    private readonly int nLocalKvHeads;
+    private readonly int nRep;
+    private readonly int headDim;
+    private readonly Linear wq, wk, wv, wo;
+    private readonly Dropout attnDropout, residDropout;
+    private readonly float dropout;
+    private readonly bool flash;
+    private readonly Tensor mask;
 
-    public Attention (ModelArgs args) : base (nameof(Attention)) {
+    public Attention (ModelArgs args) : base ("Attention") {
         nKvHeads = args.NKvHeads.HasValue ? args.NKvHeads.Value : args.NHeads;
         if (args.NHeads % nKvHeads != 0)
             throw new InvalidOperationException ("n_heads must be divisible by n_kv_heads.");
@@ -208,12 +210,12 @@ public class Attention : nn.Module
     }
 }
 
-public class FeedForward : nn.Module<Tensor, Tensor>
+public class FeedForward : Module<Tensor, Tensor>
 {
-    private Linear w1, w2, w3;
-    private Dropout dropout;
+    private readonly Linear w1, w2, w3;
+    private readonly Dropout dropout;
 
-    public FeedForward (int dim, int? hiddenDim, int multipleOf, float dropout) : base (nameof(FeedForward)) {
+    public FeedForward (int dim, int? hiddenDim, int multipleOf, float dropout) : base ("FeedForward") {
         if (!hiddenDim.HasValue) {
             hiddenDim = 4 * dim;
             hiddenDim = (int)(2 * hiddenDim / 3);
@@ -234,14 +236,14 @@ public class FeedForward : nn.Module<Tensor, Tensor>
     }
 }
 
-public class TransformerBlock : nn.Module
+public class TransformerBlock : Module
 {
-    private Attention attention;
-    private FeedForward feedForward;
-    private RMSNorm attentionNorm;
-    private RMSNorm ffnNorm;
+    private readonly Attention attention;
+    private readonly FeedForward feedForward;
+    private readonly RMSNorm attentionNorm;
+    private readonly RMSNorm ffnNorm;
 
-    public TransformerBlock (int layerId, ModelArgs args) : base (nameof(TransformerBlock)) {
+    public TransformerBlock (int layerId, ModelArgs args) : base ("TransformerBlock") {
         attention = new Attention (args);
         feedForward = new FeedForward (args.Dim, args.HiddenDim, args.MultipleOf, args.Dropout);
         attentionNorm = new RMSNorm (args.Dim, args.NormEps);
@@ -257,28 +259,28 @@ public class TransformerBlock : nn.Module
     }
 }
 
-public class Transformer : nn.Module
+public class Transformer : Module
 {
-    private ModelArgs args;
-    private Embedding tokEmbeddings;
-    private Dropout dropout;
-    private List<TransformerBlock> layers;
-    private RMSNorm norm;
-    private Linear output;
+    private readonly ModelArgs args;
+    private readonly Embedding tokEmbeddings;
+    private readonly Dropout dropout;
+    private readonly ModuleList<TransformerBlock> layers;
+    private readonly RMSNorm norm;
+    private readonly Linear output;
 
-    private Tensor freqs_cos;
-    private Tensor freqs_sin;
+    private readonly Tensor freqs_cos;
+    private readonly Tensor freqs_sin;
 
     public Tensor LastLoss { get; private set; }
 
-    public Transformer (ModelArgs args) : base (nameof(Transformer)) {
+    public Transformer (ModelArgs args) : base ("Transformer") {
         this.args = args;
         tokEmbeddings = nn.Embedding (args.VocabSize, args.Dim);
         dropout = nn.Dropout (args.Dropout);
 
-        layers = new List<TransformerBlock> ();
+        layers = new ModuleList<TransformerBlock> ();
         for (int i = 0; i < args.NLayers; i++)
-            layers.Add (new TransformerBlock (i, args));
+            layers.append (new TransformerBlock (i, args));
 
         norm = new RMSNorm (args.Dim, args.NormEps);
         output = nn.Linear (args.Dim, args.VocabSize, hasBias: false);
@@ -304,10 +306,10 @@ public class Transformer : nn.Module
         RegisterComponents ();
     }
 
-    private void _InitWeights (nn.Module module) {
+    private void _InitWeights (Module module) {
         if (module is Linear linear) {
             nn.init.normal_ (linear.weight, mean: 0.0, std: 0.02);
-            if (!ReferenceEquals (linear.bias, null)) {
+            if (linear.bias is not null) {
                 nn.init.zeros_ (linear.bias);
             }
         } else if (module is Embedding embedding) {
@@ -322,8 +324,8 @@ public class Transformer : nn.Module
         var h = tokEmbeddings.forward (tokens);
         h = dropout.forward (h);
 
-        var freqs_cos_slice = freqs_cos.index (new TensorIndex[] { TensorIndex.Slice (0, seqlen) });
-        var freqs_sin_slice = freqs_sin.index (new TensorIndex[] { TensorIndex.Slice (0, seqlen) });
+        var freqs_cos_slice = freqs_cos.index_select (0, arange (0, seqlen, device: tokens.device));
+        var freqs_sin_slice = freqs_sin.index_select (0, arange (0, seqlen, device: tokens.device));
 
         foreach (var layer in layers)
             h = layer.Forward (h, freqs_cos_slice, freqs_sin_slice);
@@ -342,7 +344,7 @@ public class Transformer : nn.Module
         return logits;
     }
 
-    public optim.Optimizer ConfigureOptimizers (double weightDecay, double learningRate, (double, double) betas, string deviceType) {
+    public Optimizer ConfigureOptimizers (double weightDecay, double learningRate, (double, double) betas, string deviceType) {
         var paramDict = named_parameters ().ToDictionary (kv => kv.name, kv => kv.parameter);
         paramDict = paramDict.Where (kv => kv.Value.requires_grad).ToDictionary (kv => kv.Key, kv => kv.Value);
 
@@ -356,22 +358,13 @@ public class Transformer : nn.Module
         Console.WriteLine ($"num non-decayed parameter tensors: {nodecayParams.Count}, with {numNodecayParams:N0} parameters");
 
         // Create optimizer parameter groups
-        var optimGroups = new List<Dictionary<string, object>> {
-            new Dictionary<string, object> {
-                { "params", decayParams },
-                { "weight_decay", weightDecay }
-            },
-            new Dictionary<string, object> {
-                { "params", nodecayParams },
-                { "weight_decay", 0.0 }
-            }
+        var optimGroups = new List<AdamW.ParamGroup> {
+            new(decayParams, weight_decay: weightDecay),
+            new(nodecayParams, weight_decay: 0),
         };
 
         // TorchSharp does not support fused optimizers yet
-        var optimizer = optim.AdamW (optimGroups, learningRate, beta1: betas.Item1, beta2: betas.Item2);
-
-        Console.WriteLine ($"Using fused AdamW: False");
-        return optimizer;
+        return AdamW (optimGroups, learningRate, betas.Item1, betas.Item2);
     }
 
     public double EstimateMfu (int fwdbwdPerIter, double dt) {
@@ -414,7 +407,7 @@ public class Transformer : nn.Module
             if (temperature == 0.0) {
                 // Sample the single most likely index
                 var topk = logits.topk (1, dim: -1);
-                idx_next = topk.indices;
+                idx_next = topk.indexes;
             } else {
                 logits = logits / temperature;
                 if (topK.HasValue) {
@@ -524,45 +517,60 @@ class Program
         double bestValLoss = double.MaxValue;
         double runningMfu = -1.0;
 
-        // Data loader (using synthetic data for demonstration)
-        var trainData = GenerateSyntheticData (100000, batchSize, maxSeqLen, vocabSize, deviceType).GetEnumerator ();
-        var valData = GenerateSyntheticData (10000, batchSize, maxSeqLen, vocabSize, deviceType).GetEnumerator ();
+        var trainBatchIter = GenerateSyntheticData (100000, batchSize, maxSeqLen, vocabSize, deviceType).GetEnumerator ();
+        trainBatchIter.MoveNext ();
+        var (X, Y) = trainBatchIter.Current;
 
         // For timing
         var t0 = Stopwatch.GetTimestamp ();
         var stopwatch = Stopwatch.StartNew ();
 
         Console.WriteLine ("Starting training loop...");
-        while (iterNum <= maxIters) {
-            model.train ();
+        while (true) {
+            // Determine and set the learning rate for this iteration
+            double lr = GetLearningRate (iterNum, warmupIters, lrDecayIters, learningRate, minLr, decayLr);
+
+            foreach (var paramGroup in optimizer.ParamGroups) {
+                paramGroup.LearningRate = lr;
+            }
+
+            // Evaluate the loss on train/val sets and write checkpoints
+            if (iterNum % evalInterval == 0) {
+                var losses = EstimateLoss (model, evalIters, batchSize, maxSeqLen, vocabSize, deviceType);
+                Console.WriteLine ($"step {iterNum}: train loss {losses["train"]:.4f}, val loss {losses["val"]:.4f}");
+
+                if (losses["val"] < bestValLoss || alwaysSaveCheckpoint) {
+                    bestValLoss = losses["val"];
+                    if (iterNum > 0) {
+                        Console.WriteLine ($"saving checkpoint to {outDir}");
+                        // Implement model export if needed
+                    }
+                }
+
+                if (iterNum == 0 && evalOnly) {
+                    break;
+                }
+            }
 
             optimizer.zero_grad ();
 
-            double runningLoss = 0.0;
-            for (int accStep = 0; accStep < gradientAccumulationSteps; accStep++) {
-                if (!trainData.MoveNext ()) {
-                    trainData = GenerateSyntheticData (100000, batchSize, maxSeqLen, vocabSize, deviceType).GetEnumerator ();
-                    trainData.MoveNext ();
+            for (int microStep = 0; microStep < gradientAccumulationSteps; microStep++) {
+                // Pre-fetch next batch
+                if (!trainBatchIter.MoveNext ()) {
+                    trainBatchIter = GenerateSyntheticData (100000, batchSize, maxSeqLen, vocabSize, deviceType).GetEnumerator ();
+                    trainBatchIter.MoveNext ();
                 }
 
-                var (X, Y) = trainData.Current;
-
-                X = X.to (deviceType);
-                Y = Y.to (deviceType);
-
-                var logits = model.Forward (X, Y);
-                var loss = model.LastLoss / gradientAccumulationSteps;
-                loss.backward ();
-
-                runningLoss += loss.item<double> ();
+                (X, Y) = trainBatchIter.Current;
             }
 
-            // Gradient clipping
+            // Clip the gradient
             if (gradClip > 0) {
                 nn.utils.clip_grad_norm_ (model.parameters (), gradClip);
             }
 
-            optimizer.step ();
+            // Zero gradients
+            optimizer.zero_grad ();
 
             // Timing and logging
             var t1 = Stopwatch.GetTimestamp ();
@@ -570,7 +578,9 @@ class Program
             t0 = t1;
 
             if (iterNum % logInterval == 0) {
-                var lossf = runningLoss * gradientAccumulationSteps;
+                // Get loss as float, scale up due to the divide above.
+                var lossf = model.LastLoss.item<double> () * gradientAccumulationSteps;
+
                 if (localIterNum >= 5) {
                     var mfu = model.EstimateMfu (batchSize * gradientAccumulationSteps, dt);
                     runningMfu = runningMfu == -1.0 ? mfu : 0.9 * runningMfu + 0.1 * mfu;
@@ -578,72 +588,72 @@ class Program
                     runningMfu = -1.0;
                 }
 
-                Console.WriteLine ($"{iterNum} | loss {runningLoss:F4} | lr {learningRate:E} | {dt * 1000:F2}ms | mfu {runningMfu * 100:F2}%");
+                Console.WriteLine ($"{iterNum} | loss {lossf:F4} | lr {lr:E} | {dt * 1000:F2}ms | mfu {runningMfu * 100:F2}%");
             }
 
-            localIterNum++;
             iterNum++;
+            localIterNum++;
 
-            // Evaluation
-            if (iterNum % evalInterval == 0 && iterNum > 0) {
-                model.eval ();
-                double valLoss = 0.0;
-                int valSteps = 0;
-
-                using (torch.no_grad ()) {
-                    valData = GenerateSyntheticData (10000, batchSize, maxSeqLen, vocabSize, deviceType).GetEnumerator ();
-                    while (valData.MoveNext ()) {
-                        var (X_val, Y_val) = valData.Current;
-                        X_val = X_val.to (deviceType);
-                        Y_val = Y_val.to (deviceType);
-
-                        var logits = model.Forward (X_val, Y_val);
-                        var loss = model.LastLoss;
-                        valLoss += loss.item<double> ();
-
-                        valSteps++;
-                        if (valSteps >= evalIters)
-                            break;
-                    }
-                }
-
-                valLoss /= valSteps;
-
-                Console.WriteLine ($"Validation Loss after {iterNum} iterations: {valLoss}");
-
-                if (valLoss < bestValLoss) {
-                    bestValLoss = valLoss;
-                    Console.WriteLine ("New best validation loss, saving model...");
-                    // Save model (to be implemented)
-                }
-
-                model.train ();
-            }
-
-            // Learning rate scheduling
-            if (decayLr) {
-                double lr;
-                if (iterNum < warmupIters) {
-                    lr = learningRate * iterNum / warmupIters;
-                } else if (iterNum > lrDecayIters) {
-                    lr = minLr;
-                } else {
-                    var decayRatio = (double)(iterNum - warmupIters) / (lrDecayIters - warmupIters);
-                    var coeff = 0.5 * (1.0 + Math.Cos (Math.PI * decayRatio));
-                    lr = minLr + coeff * (learningRate - minLr);
-                }
-
-                foreach (var paramGroup in optimizer.ParamGroups) {
-                    paramGroup.LearningRate = lr;
-                }
-            }
+            // Termination conditions
+            if (iterNum > maxIters)
+                break;
         }
 
         stopwatch.Stop ();
         Console.WriteLine ($"Training completed in {stopwatch.Elapsed.TotalSeconds} seconds");
     }
 
-    // Generate synthetic data for demonstration purposes
+    static double GetLearningRate (int iterNum, int warmupIters, int lrDecayIters, double learningRate, double minLr, bool decayLr) {
+        if (!decayLr)
+            return learningRate;
+
+        if (iterNum < warmupIters) {
+            return learningRate * iterNum / warmupIters;
+        } else if (iterNum > lrDecayIters) {
+            return minLr;
+        } else {
+            double decayRatio = (double)(iterNum - warmupIters) / (lrDecayIters - warmupIters);
+            double coeff = 0.5 * (1.0 + Math.Cos (Math.PI * decayRatio));
+            return minLr + coeff * (learningRate - minLr);
+        }
+    }
+
+    static Dictionary<string, double> EstimateLoss (Transformer model, int evalIters, int batchSize, int maxSeqLen, int vocabSize,
+        Device deviceType) {
+        var outDict = new Dictionary<string, double> ();
+        model.eval ();
+
+        foreach (var split in new[] {
+                     "train",
+                     "val"
+                 }) {
+            var batchIter = GenerateSyntheticData (10000, batchSize, maxSeqLen, vocabSize, deviceType).GetEnumerator ();
+            var losses = new List<double> ();
+
+            for (int k = 0; k < evalIters; k++) {
+                if (!batchIter.MoveNext ()) {
+                    batchIter = GenerateSyntheticData (10000, batchSize, maxSeqLen, vocabSize, deviceType).GetEnumerator ();
+                    batchIter.MoveNext ();
+                }
+
+                var (X, Y) = batchIter.Current;
+                X = X.to (deviceType);
+                Y = Y.to (deviceType);
+
+                using (no_grad ()) {
+                    var logits = model.Forward (X, Y);
+                    var loss = model.LastLoss;
+                    losses.Add (loss.item<double> ());
+                }
+            }
+
+            outDict[split] = losses.Average ();
+        }
+
+        model.train ();
+        return outDict;
+    }
+
     static IEnumerable<(Tensor, Tensor)> GenerateSyntheticData (int totalSamples, int batchSize, int seqLen, int vocabSize, Device device) {
         int samplesGenerated = 0;
         while (samplesGenerated < totalSamples) {
