@@ -1,6 +1,6 @@
 namespace llama.cs;
 
-class Program
+static class Entrypoint
 {
     static void ErrorUsage () {
         Console.WriteLine ("Usage:   run <checkpoint> [options]");

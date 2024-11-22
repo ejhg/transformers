@@ -2,7 +2,7 @@ using transformers.utils;
 
 namespace llama;
 
-public class Entrypoint
+static class Entrypoint
 {
     public static void run () {
         int embeddingSize = 128;

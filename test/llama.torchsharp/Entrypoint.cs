@@ -4,10 +4,9 @@ using TorchSharp;
 
 namespace llama.torchsharp;
 
-public class Entrypoint
+static class Entrypoint
 {
-    public void run (string[] args) {
-        var weightsDir = args[0];
+    public static void run (string weightsDir, string llamaResourcesDir) {
         var device = "cpu";
 
         torch.manual_seed (100);
@@ -18,8 +17,8 @@ public class Entrypoint
             ? new Llama3Tokenizer (
                 $"{weightsDir}/tokenizer.model")
             : new Llama2Tokenizer (
-                "resources/vocab.json",
-                "resources/merges.txt");
+                $"{llamaResourcesDir}/vocab.json",
+                $"{llamaResourcesDir}/merges.txt");
 
         var model = Model.build (
             modelFolder: weightsDir,

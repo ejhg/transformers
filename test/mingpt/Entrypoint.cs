@@ -2,7 +2,7 @@ using transformers.utils;
 
 namespace mingpt3;
 
-public class Entrypoint
+static class Entrypoint
 {
     public static void run () {
         int embeddingSize = 128;
