@@ -1,7 +1,7 @@
 using TorchSharp;
 using TorchSharp.Modules;
 
-namespace LLAMA;
+namespace llama.torchsharp.blocks;
 
 public class SelfAttention : torch.nn.Module<torch.Tensor, int, torch.Tensor, torch.Tensor?, torch.Tensor>
 {

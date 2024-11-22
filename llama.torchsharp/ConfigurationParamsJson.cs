@@ -1,4 +1,4 @@
-namespace LLAMA;
+namespace llama.torchsharp;
 
 public class ConfigurationParamsJson
 {

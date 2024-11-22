@@ -1,9 +1,10 @@
-﻿using System.Diagnostics;
+﻿using llama.torchsharp.blocks;
+using System.Diagnostics;
 using System.Text.Json;
 using TorchSharp;
-using llama.unpickler;
+using TorchSharp.PyBridge;
 
-namespace LLAMA;
+namespace llama.torchsharp;
 
 static class Model
 {
@@ -49,8 +50,9 @@ static class Model
         var model = new Transformer (modelArgs);
 
         Console.WriteLine ("loading checkpoint");
-        model.load_weights (
-            location: Path.Combine (modelFolder, modelWeightPath));
+        model.load_py (
+            location: Path.Combine (modelFolder, modelWeightPath),
+            strict: false);
 
         model = model.to (device);
 

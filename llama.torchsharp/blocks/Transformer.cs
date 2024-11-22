@@ -3,13 +3,13 @@ using TorchSharp;
 using TorchSharp.Modules;
 using static TorchSharp.torch;
 
-namespace LLAMA;
+namespace llama.torchsharp.blocks;
 
 public class Transformer : nn.Module<Tensor, int, Tensor>
 {
     public ConfigurationParams args;
 
-    Embedding tok_embeddings;
+    TorchSharp.Modules.Embedding tok_embeddings;
 
     ModuleList<nn.Module<Tensor, int, Tensor, Tensor?, Tensor>> layers;
 

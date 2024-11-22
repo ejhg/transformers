@@ -1,6 +1,6 @@
 using TorchSharp;
 
-namespace LLAMA;
+namespace llama.torchsharp.blocks;
 
 public class EncoderBlock : torch.nn.Module<torch.Tensor, int, torch.Tensor, torch.Tensor?, torch.Tensor>
 {

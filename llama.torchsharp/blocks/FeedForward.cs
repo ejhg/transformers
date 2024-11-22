@@ -1,7 +1,7 @@
 using TorchSharp;
 using TorchSharp.Modules;
 
-namespace LLAMA;
+namespace llama.torchsharp.blocks;
 
 public class FeedForward : torch.nn.Module<torch.Tensor, torch.Tensor>
 {

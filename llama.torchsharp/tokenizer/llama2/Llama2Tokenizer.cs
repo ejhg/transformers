@@ -1,6 +1,6 @@
 using Microsoft.ML.Tokenizers;
 
-namespace LLAMA;
+namespace llama.torchsharp.tokenizer.llama2;
 
 public class Llama2Tokenizer : ITokenizer
 {

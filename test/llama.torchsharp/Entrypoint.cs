@@ -1,5 +1,5 @@
-﻿using LLAMA;
-using LLAMA.tokenizer.llama_3;
+﻿using llama.torchsharp.tokenizer.llama2;
+using llama.torchsharp.tokenizer.llama3;
 using TorchSharp;
 
 namespace llama.torchsharp;

@@ -1,6 +1,6 @@
 using TorchSharp;
 
-namespace LLAMA;
+namespace llama.torchsharp;
 
 public class ConfigurationParams
 {

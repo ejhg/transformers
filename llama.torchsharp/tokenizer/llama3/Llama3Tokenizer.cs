@@ -1,6 +1,6 @@
 using Tiktoken;
 
-namespace LLAMA.tokenizer.llama_3;
+namespace llama.torchsharp.tokenizer.llama3;
 
 public class Llama3Tokenizer : ITokenizer
 {

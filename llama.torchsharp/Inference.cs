@@ -1,7 +1,8 @@
+using llama.torchsharp.blocks;
 using System.Diagnostics;
 using TorchSharp;
 
-namespace LLAMA;
+namespace llama.torchsharp;
 
 public record CompletionPrediction (string generation, string[]? tokens, float[]? logProbs);
 
