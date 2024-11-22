@@ -2,7 +2,7 @@ using transformers.utils;
 
 namespace mingpt3;
 
-public class MinGPT3Test
+public class Entrypoint
 {
     public static void run () {
         int embeddingSize = 128;

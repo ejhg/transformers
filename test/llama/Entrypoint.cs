@@ -1,8 +1,8 @@
-using llama;
-
 using transformers.utils;
 
-public class LlamaTest
+namespace llama;
+
+public class Entrypoint
 {
     public static void run () {
         int embeddingSize = 128;
