@@ -7,15 +7,13 @@
         <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     </PropertyGroup>
     <ItemGroup>
-      <Compile Remove="tests\**" />
+        <Compile Remove="tests\**"/>
     </ItemGroup>
     <ItemGroup>
-      <EmbeddedResource Remove="tests\**" />
-    </ItemGroup>
-    <ItemGroup>
-      <None Remove="tests\**" />
-    </ItemGroup>
-    <ItemGroup>
-      <PackageReference Include="TorchSharp" Version="0.103.1" />
+        <PackageReference Include="Microsoft.ML.Tokenizers" Version="0.21.1"/>
+        <PackageReference Include="Tiktoken" Version="2.0.3"/>
+        <PackageReference Include="TorchSharp" Version="0.103.1"/>
+        <PackageReference Include="TorchSharp-cpu" Version="0.103.1"/>
+        <PackageReference Include="TorchSharp.PyBridge" Version="1.4.3"/>
     </ItemGroup>
 </Project>
