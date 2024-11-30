@@ -9,11 +9,6 @@ public class SelfAttention : torch.nn.Module<torch.Tensor, int, torch.Tensor, to
 
     int nHeadsQ;
 
-    /// <summary>
-    /// Indicates how many times the Keys and Values should be repeated
-    /// </summary>
-    int nRep => this.nHeadsQ / this.nKVHeads;
-
     int headDim;
 
     Linear wq;
@@ -85,10 +80,10 @@ public class SelfAttention : torch.nn.Module<torch.Tensor, int, torch.Tensor, to
 
         // Since every group of Q shares the same K and V heads, just repeat the K and V heads for every Q in the same group.
         // (B, Seq_Len, H_KV, Head_Dim) -> (B, Seq_Len_KV, H_Q, Head_Dim)
-        keys = RepeatKV (keys, this.nRep);
+        keys = RepeatKV (keys, this.nHeadsQ / this.nKVHeads);
 
         // (B, Seq_Len, H_KV, Head_Dim) -> (B, Seq_Len_KV, H_Q, Head_Dim)
-        values = RepeatKV (values, this.nRep);
+        values = RepeatKV (values, this.nHeadsQ / this.nKVHeads);
 
         // (B, Seq_Len, H_Q, Head_Dim) -> (B, H_Q, Seq_Len, Head_Dim)
         xq = xq.transpose (1, 2);

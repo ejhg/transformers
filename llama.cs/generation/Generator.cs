@@ -1,64 +1,66 @@
+using llama.torchsharp;
+
 namespace llama.cs;
 
 public class Generator
 {
-    public static void Generate (model transformer, Tokenizer tokenizer, Sampler sampler, string prompt, int steps) {
+    public static void Generate (model transformer, ITokenizer tokenizer, Sampler sampler, string prompt, int steps) {
         if (prompt == null) {
-            prompt = "";
+            throw new ArgumentException ("prompt is null");
         }
 
-        List<int> tokens = new List<int> ();
-        tokenizer.Encode (prompt, true, false, tokens);
+        var tokens = tokenizer.Encode (prompt, true, false).ToList ();
 
         if (tokens.Count < 1) {
-            Console.Error.WriteLine ("Expected at least 1 prompt token");
-            Environment.Exit (1);
+            throw new Exception ("Expected at least 1 prompt token");
         }
 
-        long start = 0;
-        int next = 0;
-        int token = tokens[0];
+        var start = System.Diagnostics.Stopwatch.StartNew ();
         int pos = 0;
 
-        while (pos < steps) {
-            float[] logits = ForwardPass.Forward (transformer, token, pos);
+        float[] logits = null;
 
-            if (pos < tokens.Count - 1) {
-                next = tokens[pos + 1];
-            } else {
-                next = sampler.Sample (logits);
+        foreach (var curr in tokens) {
+            logits = ForwardPass.Forward (transformer, curr, pos++);
+        }
+
+        var next = sampler.Sample (logits);
+
+        while (pos < steps) {
+            logits = ForwardPass.Forward (transformer, next, pos++);
+            next = sampler.Sample (logits);
+
+            if (next == 1) {
+                break;
             }
 
-            pos++;
+            tokens.Add (next);
 
-            if (next == 1) break;
-
-            string piece = tokenizer.Decode (token, next);
-            tokenizer.SafePrint (piece);
-            token = next;
-
-            if (start == 0) start = TimeInMs ();
+            var piece = tokenizer.Decode (tokens.ToArray ());
+            Console.WriteLine (piece);
         }
 
         Console.WriteLine ();
 
         if (pos > 1) {
-            long end = TimeInMs ();
-            Console.Error.WriteLine ($"Achieved tok/s: {(pos - 1) / ((end - start) / 1000.0)}");
+            var elapsed = start.ElapsedMilliseconds;
+            Console.Error.WriteLine ($"Achieved tok/s: {(pos - 1) / (elapsed / 1000.0)}");
         }
     }
 
-    static long TimeInMs () {
-        return DateTimeOffset.Now.ToUnixTimeMilliseconds ();
-    }
-
-    public static void Chat (model transformer, Tokenizer tokenizer, Sampler sampler, string cli_user_prompt, string cli_system_prompt,
-        int steps) {
+    public static void Chat (
+        model transformer,
+        ITokenizer tokenizer,
+        Sampler sampler,
+        string cli_user_prompt,
+        string cli_system_prompt,
+        int steps
+    ) {
         // Buffers for prompts
         string system_prompt = "";
         string user_prompt = "";
         string rendered_prompt = "";
-        List<int> prompt_tokens = new List<int> ();
+        var prompt_tokens = Array.Empty<int>();
         int user_idx = 0;
 
         bool user_turn = true; // User starts
@@ -94,15 +96,14 @@ public class Generator
                 }
 
                 // Encode the rendered prompt into tokens
-                prompt_tokens.Clear ();
-                tokenizer.Encode (rendered_prompt, true, false, prompt_tokens);
+                prompt_tokens = tokenizer.Encode (rendered_prompt, true, false);
                 user_idx = 0; // Reset user index
                 user_turn = false;
                 Console.Write ("Assistant: ");
             }
 
             // Determine the token to pass into the transformer next
-            if (user_idx < prompt_tokens.Count) {
+            if (user_idx < prompt_tokens.Length) {
                 token = prompt_tokens[user_idx++];
             } else {
                 token = next;
@@ -118,10 +119,10 @@ public class Generator
             next = sampler.Sample (logits);
             pos++;
 
-            if (user_idx >= prompt_tokens.Count && next != 2) {
+            if (user_idx >= prompt_tokens.Length && next != 2) {
                 // Assistant is responding
-                string piece = tokenizer.Decode (token, next);
-                tokenizer.SafePrint (piece);
+                var piece = tokenizer.Decode ([token, next]);
+                Console.Write (piece);
             }
 
             if (next == 2) {

@@ -25,6 +25,8 @@ public class weights
         public float[,] w3; // [hidden_dim][dim]
     }
 
+    public float[] rope; // [freqs]
+
     // Final RMSNorm
     public float[] rms_final_weight; // [dim]
 

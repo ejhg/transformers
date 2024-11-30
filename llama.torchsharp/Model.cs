@@ -20,8 +20,7 @@ static class Model
         var stopWatch = new Stopwatch ();
         stopWatch.Start ();
 
-        paramJsonPath = Path.Combine (modelFolder, paramJsonPath);
-        var json = JsonSerializer.Deserialize<ConfigurationParamsJson> (File.ReadAllText (paramJsonPath));
+        var json = JsonSerializer.Deserialize<ConfigurationParamsJson> (File.ReadAllText (Path.Combine (modelFolder, paramJsonPath)));
 
         var modelArgs = new ConfigurationParams {
             dim = json.dim,

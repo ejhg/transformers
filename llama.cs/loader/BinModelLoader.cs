@@ -1,39 +1,37 @@
 namespace llama.cs;
 
-public class ModelLoader
+public class BinModelLoader
 {
-    public static run_state createRunState (config p) {
-        int head_size = p.dim / p.n_heads;
-        int kv_head_size = head_size; // Assuming kv_head_size == head_size
+    public static (config config, weights weights) load (string checkpoint) {
+        using FileStream fs = new FileStream (checkpoint, FileMode.Open, FileAccess.Read);
+        using BinaryReader br = new BinaryReader (fs);
 
-        var kv_cache = Enumerable
-            .Range (0, p.n_layers)
-            .Select (_ => {
-                var _cache = new run_state.LayerCache {
-                    key_cache = new float[p.seq_len][],
-                    value_cache = new float[p.seq_len][]
-                };
-
-                for (int t = 0; t < p.seq_len; t++) {
-                    _cache.key_cache[t] = new float[p.n_kv_heads * kv_head_size];
-                    _cache.value_cache[t] = new float[p.n_kv_heads * kv_head_size];
-                }
-
-                return _cache;
-            }).ToArray ();
-
-        return new run_state {
-            x = new float[p.dim],
-            xb = new float[p.dim],
-            xb2 = new float[p.dim],
-            hb = new float[p.hidden_dim],
-            hb2 = new float[p.hidden_dim],
-            q = new float[p.n_heads * head_size],
-            k = new float[p.n_kv_heads * kv_head_size],
-            v = new float[p.n_kv_heads * kv_head_size],
-            logits = new float[p.vocab_size],
-            kv_cache = kv_cache,
+        var config = new config {
+            dim = br.ReadInt32 (),
+            hidden_dim = br.ReadInt32 (),
+            n_layers = br.ReadInt32 (),
+            n_heads = br.ReadInt32 (),
+            n_kv_heads = br.ReadInt32 (),
+            vocab_size = br.ReadInt32 (),
+            seq_len = br.ReadInt32 ()
         };
+
+        int shared_weights = config.vocab_size > 0 ? 1 : 0;
+        config.vocab_size = Math.Abs (config.vocab_size);
+
+        var file_size = fs.Length;
+
+        // Read data
+        int dataSize = (int)((file_size - 7 * sizeof(int)) / sizeof(float)); // 7 ints in Config
+        var data = new float[dataSize];
+        for (int i = 0; i < dataSize; i++) {
+            data[i] = br.ReadSingle ();
+        }
+
+        // Map weights
+        var weights = MemoryMapWeights (config, data, shared_weights);
+
+        return (config, weights);
     }
 
     static weights MemoryMapWeights (config p, float[] data, int shared_weights) {
@@ -158,37 +156,5 @@ public class ModelLoader
         }
 
         return w;
-    }
-
-    public static (config config, weights weights) ReadCheckpoint (string checkpoint) {
-        using FileStream fs = new FileStream (checkpoint, FileMode.Open, FileAccess.Read);
-        using BinaryReader br = new BinaryReader (fs);
-
-        var config = new config {
-            dim = br.ReadInt32 (),
-            hidden_dim = br.ReadInt32 (),
-            n_layers = br.ReadInt32 (),
-            n_heads = br.ReadInt32 (),
-            n_kv_heads = br.ReadInt32 (),
-            vocab_size = br.ReadInt32 (),
-            seq_len = br.ReadInt32 ()
-        };
-
-        int shared_weights = config.vocab_size > 0 ? 1 : 0;
-        config.vocab_size = Math.Abs (config.vocab_size);
-
-        var file_size = fs.Length;
-
-        // Read data
-        int dataSize = (int)((file_size - 7 * sizeof(int)) / sizeof(float)); // 7 ints in Config
-        var data = new float[dataSize];
-        for (int i = 0; i < dataSize; i++) {
-            data[i] = br.ReadSingle ();
-        }
-
-        // Map weights
-        var weights = MemoryMapWeights (config, data, shared_weights);
-
-        return (config, weights);
     }
 }

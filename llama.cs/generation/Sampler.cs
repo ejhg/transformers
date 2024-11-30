@@ -1,20 +1,25 @@
 namespace llama.cs;
 
 /**
- * The Sampler, which takes logits and returns a sampled token
+ * The sampler takes in logits and returns a sampled token
  */
 public class Sampler
 {
     int vocab_size;
+
     float temperature;
+
     float topp;
+
     Random rng;
 
-    public Sampler (int vocab_size, float temperature, float topp, int rng_seed) {
+    public Sampler (int vocab_size, float temperature, float topp, int? rng_seed) {
         this.vocab_size = vocab_size;
         this.temperature = temperature;
         this.topp = topp;
-        rng = new Random (rng_seed);
+        rng = rng_seed == null
+            ? new Random ()
+            : new Random (rng_seed.Value);
     }
 
     int SampleArgMax (float[] probabilities) {
@@ -88,18 +93,18 @@ public class Sampler
     public int Sample (float[] logits) {
         if (temperature == 0.0f) {
             return SampleArgMax (logits);
-        } else {
-            for (int i = 0; i < logits.Length; i++) {
-                logits[i] /= temperature;
-            }
-
-            ForwardPass.Softmax (logits, logits.Length);
-
-            if (topp <= 0 || topp >= 1) {
-                return SampleMult (logits);
-            } else {
-                return SampleTopP (logits);
-            }
         }
+
+        for (int i = 0; i < logits.Length; i++) {
+            logits[i] /= temperature;
+        }
+
+        ForwardPass.Softmax (logits, logits.Length);
+
+        if (topp <= 0 || topp >= 1) {
+            return SampleMult (logits);
+        }
+
+        return SampleTopP (logits);
     }
 }

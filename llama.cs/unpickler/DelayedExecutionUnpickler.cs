@@ -2,7 +2,6 @@ using Razorvine.Pickle;
 using Razorvine.Pickle.Objects;
 using System.Collections;
 using System.IO.Compression;
-using TorchSharp;
 
 namespace llama.unpickler;
 
@@ -12,7 +11,7 @@ public static class DelayedExecutionUnpickler
     {
         public Stream data { get; set; }
 
-        public torch.ScalarType dtype { get; set; }
+        public string dtype { get; set; }
     }
 
     static DelayedExecutionUnpickler () {
@@ -50,31 +49,12 @@ public static class DelayedExecutionUnpickler
                 ? ((ClassDictConstructor)objArray[1]).name
                 : throw new NotImplementedException ("Unknown persistent id loaded");
             var archiveKey = (string)objArray[2];
-            var typeFromStorageName = GetScalarTypeFromStorageName (storage);
             var zipArchiveEntry = this._archive.Entries
                 .First (f => f.FullName.EndsWith ("data/" + archiveKey));
 
             return new TensorStream {
                 data = zipArchiveEntry.Open (),
-                dtype = typeFromStorageName
-            };
-        }
-
-        static torch.ScalarType GetScalarTypeFromStorageName (string storage) {
-            return storage switch {
-                "IntStorage" => torch.@int,
-                "CharStorage" => torch.int8,
-                "HalfStorage" => torch.half,
-                "LongStorage" => torch.@long,
-                "BoolStorage" => torch.@bool,
-                "ByteStorage" => torch.uint8,
-                "FloatStorage" => torch.@float,
-                "ShortStorage" => torch.int16,
-                "DoubleStorage" => torch.float64,
-                "BFloat16Storage" => torch.bfloat16,
-                "ComplexFloatStorage" => torch.cfloat,
-                "ComplexDoubleStorage" => torch.cdouble,
-                _ => throw new NotImplementedException ()
+                dtype = storage
             };
         }
     }
@@ -82,10 +62,10 @@ public static class DelayedExecutionUnpickler
     class OrderedDict : Hashtable
     {
         public void __setstate__ (Hashtable arg) {
-            foreach (string key in (IEnumerable)arg.Keys) {
-                if ((object)(arg[(object)key] as torch.Tensor) != null)
-                    this[(object)key] = arg[(object)key];
-            }
+            // foreach (string key in (IEnumerable)arg.Keys) {
+            //     if ((object)(arg[(object)key] as torch.Tensor) != null)
+            //         this[(object)key] = arg[(object)key];
+            // }
         }
     }
 

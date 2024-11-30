@@ -1,3 +1,4 @@
+using llama.torchsharp;
 using System.Text;
 
 namespace llama.cs;
@@ -5,22 +6,33 @@ namespace llama.cs;
 /**
  * The Byte Pair Encoding (BPE) Tokenizer that translates strings <-> tokens
  */
-public class Tokenizer
+public class Tokenizer : ITokenizer
 {
     string[] vocab;
+
     float[] vocab_scores;
+
     Dictionary<string, int> vocab_lookup;
+
     string[] byte_pieces = new string[512];
 
-    public void BuildTokenizer (string tokenizer_path, int vocab_size) {
-        vocab = new string[vocab_size];
-        vocab_scores = new float[vocab_size];
-        vocab_lookup = null;
+    public int VocabSize => vocab.Length;
+
+    public int PadId { get; }
+
+    public int EosId { get; }
+
+    public static Tokenizer create (string tokenizer_path, int vocab_size) {
+        var ret = new Tokenizer {
+            vocab = new string[vocab_size],
+            vocab_scores = new float[vocab_size],
+            vocab_lookup = null
+        };
 
         // Initialize byte pieces
         for (int i = 0; i < 256; i++) {
-            byte_pieces[i * 2] = ((char)i).ToString ();
-            byte_pieces[i * 2 + 1] = '\0'.ToString ();
+            ret.byte_pieces[i * 2] = ((char)i).ToString ();
+            ret.byte_pieces[i * 2 + 1] = '\0'.ToString ();
         }
 
         using FileStream fs = new FileStream (tokenizer_path, FileMode.Open, FileAccess.Read);
@@ -30,13 +42,18 @@ public class Tokenizer
         var max_token_length = br.ReadUInt32 ();
 
         for (int i = 0; i < vocab_size; i++) {
-            vocab_scores[i] = br.ReadSingle ();
+            ret.vocab_scores[i] = br.ReadSingle ();
             var len = br.ReadInt32 ();
-            vocab[i] = Encoding.UTF8.GetString (br.ReadBytes (len));
+            ret.vocab[i] = Encoding.UTF8.GetString (br.ReadBytes (len));
         }
+
+        return ret;
     }
 
-    public string Decode (int prev_token, int token) {
+    public string Decode (int[] tokens) {
+        var token = tokens[^1];
+        var prev_token = tokens[^2];
+
         string piece = vocab[token];
         if (prev_token == 1 && piece.StartsWith (" ")) {
             piece = piece.Substring (1);
@@ -49,15 +66,11 @@ public class Tokenizer
             }
         }
 
-        return piece;
-    }
-
-    public void SafePrint (string piece) {
         if (string.IsNullOrEmpty (piece) || piece.Length == 1 && char.IsControl (piece[0]) && !char.IsWhiteSpace (piece[0])) {
-            return;
+            return "";
         }
 
-        Console.Write (piece);
+        return piece;
     }
 
     int StrLookup (string str) {
@@ -70,11 +83,13 @@ public class Tokenizer
         return vocab_lookup.GetValueOrDefault (str, -1);
     }
 
-    public void Encode (string text, bool bos, bool eos, List<int> tokens) {
+    public int[] Encode (string text, bool bos, bool eos) {
         if (text == null) {
             Console.Error.WriteLine ("Cannot encode null text");
             Environment.Exit (1);
         }
+
+        var tokens = new List<int> ();
 
         // Start encoding
         if (bos)
@@ -142,5 +157,7 @@ public class Tokenizer
 
         if (eos)
             tokens.Add (2); // EOS token
+
+        return tokens.ToArray ();
     }
 }
