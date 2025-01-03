@@ -1,4 +1,5 @@
-using System.Text;
+using llama.cs;
+using llama.torchsharp;
 
 namespace llama.c;
 
@@ -380,427 +381,44 @@ public class TokenIndex : IComparable<TokenIndex>
     }
 }
 
-/**
- * The Byte Pair Encoding (BPE) Tokenizer that translates strings <-> tokens
- */
-public class Tokenizer
-{
-    public string[] vocab;
-    public float[] vocab_scores;
-    public TokenIndex[] sorted_vocab;
-    public int vocab_size;
-    public uint max_token_length;
-    public string[] byte_pieces = new string[512];
-
-    public void BuildTokenizer (string tokenizer_path, int vocab_size) {
-        this.vocab_size = vocab_size;
-        vocab = new string[vocab_size];
-        vocab_scores = new float[vocab_size];
-        sorted_vocab = null;
-
-        // Initialize byte pieces
-        for (int i = 0; i < 256; i++) {
-            byte_pieces[i * 2] = ((char)i).ToString ();
-            byte_pieces[i * 2 + 1] = '\0'.ToString ();
-        }
-
-        using FileStream fs = new FileStream (tokenizer_path, FileMode.Open, FileAccess.Read);
-        using BinaryReader br = new BinaryReader (fs);
-
-        max_token_length = br.ReadUInt32 ();
-        int len;
-        for (int i = 0; i < vocab_size; i++) {
-            vocab_scores[i] = br.ReadSingle ();
-            len = br.ReadInt32 ();
-            byte[] strBytes = br.ReadBytes (len);
-            vocab[i] = Encoding.UTF8.GetString (strBytes);
-        }
-    }
-
-    public string Decode (int prev_token, int token) {
-        string piece = vocab[token];
-        if (prev_token == 1 && piece.StartsWith (" ")) {
-            piece = piece.Substring (1);
-        }
-
-        if (piece.StartsWith ("<0x") && piece.EndsWith (">")) {
-            string hex = piece.Substring (3, piece.Length - 4);
-            if (byte.TryParse (hex, System.Globalization.NumberStyles.HexNumber, null, out byte byte_val)) {
-                piece = ((char)byte_val).ToString ();
-            }
-        }
-
-        return piece;
-    }
-
-    public void SafePrint (string piece) {
-        if (string.IsNullOrEmpty (piece))
-            return;
-
-        if (piece.Length == 1) {
-            char c = piece[0];
-            if (!char.IsControl (c) || char.IsWhiteSpace (c)) {
-                Console.Write (piece);
-            }
-        } else {
-            Console.Write (piece);
-        }
-    }
-
-    int StrLookup (string str) {
-        if (sorted_vocab == null) {
-            sorted_vocab = new TokenIndex[vocab_size];
-            for (int i = 0; i < vocab_size; i++) {
-                sorted_vocab[i] = new TokenIndex {
-                    str = vocab[i],
-                    id = i
-                };
-            }
-
-            Array.Sort (sorted_vocab);
-        }
-
-        int index = Array.BinarySearch (sorted_vocab, new TokenIndex { str = str });
-        if (index >= 0) {
-            return sorted_vocab[index].id;
-        }
-
-        return -1;
-    }
-
-    public void Encode (string text, bool bos, bool eos, List<int> tokens) {
-        if (text == null) {
-            Console.Error.WriteLine ("Cannot encode null text");
-            Environment.Exit (1);
-        }
-
-        if (sorted_vocab == null) {
-            sorted_vocab = new TokenIndex[vocab_size];
-            for (int i = 0; i < vocab_size; i++) {
-                sorted_vocab[i] = new TokenIndex {
-                    str = vocab[i],
-                    id = i
-                };
-            }
-
-            Array.Sort (sorted_vocab);
-        }
-
-        // Start encoding
-        if (bos)
-            tokens.Add (1); // BOS token
-
-        if (text.Length > 0) {
-            int dummy_prefix = StrLookup (" ");
-            tokens.Add (dummy_prefix);
-        }
-
-        int str_len = 0;
-        StringBuilder str_buffer = new StringBuilder ();
-
-        for (int i = 0; i < text.Length; i++) {
-            char c = text[i];
-
-            if ((c & 0xC0) != 0x80) {
-                str_len = 0;
-            }
-
-            str_buffer.Append (c);
-            str_len++;
-
-            if (i + 1 < text.Length && (text[i + 1] & 0xC0) == 0x80 && str_len < 4) {
-                continue;
-            }
-
-            string str = str_buffer.ToString ();
-            int id = StrLookup (str);
-
-            if (id != -1) {
-                tokens.Add (id);
-            } else {
-                foreach (char ch in str) {
-                    tokens.Add ((byte)ch + 3);
-                }
-            }
-
-            str_buffer.Clear ();
-            str_len = 0;
-        }
-
-        // Merge pairs
-        while (true) {
-            float best_score = -1e10f;
-            int best_id = -1;
-            int best_idx = -1;
-
-            for (int i = 0; i < tokens.Count - 1; i++) {
-                string merged = vocab[tokens[i]] + vocab[tokens[i + 1]];
-                int id = StrLookup (merged);
-                if (id != -1 && vocab_scores[id] > best_score) {
-                    best_score = vocab_scores[id];
-                    best_id = id;
-                    best_idx = i;
-                }
-            }
-
-            if (best_idx == -1)
-                break;
-
-            tokens[best_idx] = best_id;
-            tokens.RemoveAt (best_idx + 1);
-        }
-
-        if (eos)
-            tokens.Add (2); // EOS token
-    }
-}
-
-public class ProbIndex : IComparable<ProbIndex>
-{
-    public float prob;
-    public int index;
-
-    public int CompareTo (ProbIndex other) {
-        return other.prob.CompareTo (prob);
-    }
-}
-
-/**
- * The Sampler, which takes logits and returns a sampled token
- */
-public class Sampler
-{
-    public ProbIndex[] probindex;
-    public float temperature;
-    public float topp;
-    public Random rng;
-
-    public Sampler (int vocab_size, float temperature, float topp, int rng_seed) {
-        this.temperature = temperature;
-        this.topp = topp;
-        rng = new Random (rng_seed);
-        probindex = new ProbIndex[vocab_size];
-        for (int i = 0; i < vocab_size; i++) {
-            probindex[i] = new ProbIndex ();
-        }
-    }
-
-    public int SampleArgMax (float[] probabilities) {
-        int max_i = 0;
-        float max_p = probabilities[0];
-        for (int i = 1; i < probabilities.Length; i++) {
-            if (probabilities[i] > max_p) {
-                max_p = probabilities[i];
-                max_i = i;
-            }
-        }
-
-        return max_i;
-    }
-
-    public int SampleMult (float[] probabilities) {
-        float coin = (float)rng.NextDouble ();
-        float cdf = 0.0f;
-        for (int i = 0; i < probabilities.Length; i++) {
-            cdf += probabilities[i];
-            if (coin < cdf) {
-                return i;
-            }
-        }
-
-        return probabilities.Length - 1;
-    }
-
-    public int SampleTopP (float[] probabilities) {
-        float coin = (float)rng.NextDouble ();
-        int n0 = 0;
-        float cutoff = (1.0f - topp) / (probabilities.Length - 1);
-
-        for (int i = 0; i < probabilities.Length; i++) {
-            if (probabilities[i] >= cutoff) {
-                probindex[n0].index = i;
-                probindex[n0].prob = probabilities[i];
-                n0++;
-            }
-        }
-
-        Array.Sort (probindex, 0, n0);
-
-        float cumulative_prob = 0.0f;
-        int last_idx = n0 - 1;
-        for (int i = 0; i < n0; i++) {
-            cumulative_prob += probindex[i].prob;
-            if (cumulative_prob > topp) {
-                last_idx = i;
-                break;
-            }
-        }
-
-        float r = coin * cumulative_prob;
-        float cdf = 0.0f;
-        for (int i = 0; i <= last_idx; i++) {
-            cdf += probindex[i].prob;
-            if (r < cdf) {
-                return probindex[i].index;
-            }
-        }
-
-        return probindex[last_idx].index;
-    }
-
-    public int Sample (float[] logits) {
-        if (temperature == 0.0f) {
-            return SampleArgMax (logits);
-        } else {
-            for (int i = 0; i < logits.Length; i++) {
-                logits[i] /= temperature;
-            }
-
-            TransformerModel.Softmax (logits, logits.Length);
-
-            if (topp <= 0 || topp >= 1) {
-                return SampleMult (logits);
-            } else {
-                return SampleTopP (logits);
-            }
-        }
-    }
-}
-
 public class Generator
 {
-    public static void Generate (Transformer transformer, Tokenizer tokenizer, Sampler sampler, string prompt, int steps) {
+    public static void Generate (Transformer transformer, ITokenizer tokenizer, Sampler sampler, string prompt, int steps) {
         if (prompt == null) {
             prompt = "";
         }
 
-        List<int> tokens = new List<int> ();
-        tokenizer.Encode (prompt, true, false, tokens);
-
-        if (tokens.Count < 1) {
-            Console.Error.WriteLine ("Expected at least 1 prompt token");
-            Environment.Exit (1);
-        }
+        var tokens = tokenizer.Encode (prompt, true, false);
 
         long start = 0;
         int next = 0;
-        int token = tokens[0];
         int pos = 0;
 
         while (pos < steps) {
-            float[] logits = TransformerModel.Forward (transformer, token, pos);
+            float[] logits = TransformerModel.Forward (transformer, tokens[pos], pos);
 
-            if (pos < tokens.Count - 1) {
+            if (pos < tokens.Length - 1) {
                 next = tokens[pos + 1];
             } else {
                 next = sampler.Sample (logits);
+                tokens = tokens.Concat ([next]).ToArray ();
             }
 
             pos++;
 
             if (next == 1) break;
 
-            string piece = tokenizer.Decode (token, next);
-            tokenizer.SafePrint (piece);
-            token = next;
+            Console.WriteLine(tokenizer.Decode (tokens));
 
-            if (start == 0) start = TimeInMs ();
+            if (start == 0) start = DateTimeOffset.Now.ToUnixTimeMilliseconds ();
         }
 
         Console.WriteLine ();
 
         if (pos > 1) {
-            long end = TimeInMs ();
+            long end = DateTimeOffset.Now.ToUnixTimeMilliseconds ();
             Console.Error.WriteLine ($"Achieved tok/s: {(pos - 1) / ((end - start) / 1000.0)}");
         }
-    }
-
-    static long TimeInMs () {
-        return DateTimeOffset.Now.ToUnixTimeMilliseconds ();
-    }
-
-    public static void Chat (Transformer transformer, Tokenizer tokenizer, Sampler sampler, string cli_user_prompt, string cli_system_prompt, int steps) {
-        // Buffers for prompts
-        string system_prompt = "";
-        string user_prompt = "";
-        string rendered_prompt = "";
-        List<int> prompt_tokens = new List<int> ();
-        int user_idx = 0;
-
-        bool user_turn = true; // User starts
-        int next = 0; // Next token
-        int token = 0; // Current token
-        int pos = 0; // Position in the sequence
-
-        while (pos < steps) {
-            // User's turn
-            if (user_turn) {
-                // Get system prompt at position 0
-                if (pos == 0) {
-                    if (cli_system_prompt == null) {
-                        // System prompt not provided, read from stdin
-                        ReadStdin ("Enter system prompt (optional): ", out system_prompt);
-                    } else {
-                        system_prompt = cli_system_prompt;
-                    }
-                }
-
-                // Get user prompt
-                if (pos == 0 && cli_user_prompt != null) {
-                    user_prompt = cli_user_prompt;
-                } else {
-                    ReadStdin ("User: ", out user_prompt);
-                }
-
-                // Render prompts into the Llama 2 Chat schema
-                if (pos == 0 && !string.IsNullOrEmpty (system_prompt)) {
-                    rendered_prompt = $"[INST] <<SYS>>\n{system_prompt}\n<</SYS>>\n\n{user_prompt} [/INST]";
-                } else {
-                    rendered_prompt = $"[INST] {user_prompt} [/INST]";
-                }
-
-                // Encode the rendered prompt into tokens
-                prompt_tokens.Clear ();
-                tokenizer.Encode (rendered_prompt, true, false, prompt_tokens);
-                user_idx = 0; // Reset user index
-                user_turn = false;
-                Console.Write ("Assistant: ");
-            }
-
-            // Determine the token to pass into the transformer next
-            if (user_idx < prompt_tokens.Count) {
-                token = prompt_tokens[user_idx++];
-            } else {
-                token = next;
-            }
-
-            // EOS token ends the Assistant turn
-            if (token == 2) {
-                user_turn = true;
-            }
-
-            // Forward the transformer to get logits
-            float[] logits = TransformerModel.Forward (transformer, token, pos);
-            next = sampler.Sample (logits);
-            pos++;
-
-            if (user_idx >= prompt_tokens.Count && next != 2) {
-                // Assistant is responding
-                string piece = tokenizer.Decode (token, next);
-                tokenizer.SafePrint (piece);
-            }
-
-            if (next == 2) {
-                Console.WriteLine ();
-            }
-        }
-
-        Console.WriteLine ();
-    }
-
-    static void ReadStdin (string guide, out string buffer) {
-        Console.Write (guide);
-        buffer = Console.ReadLine ();
     }
 }
 
@@ -889,8 +507,7 @@ class Program
         }
 
         // Build the Tokenizer via the tokenizer .bin file
-        Tokenizer tokenizer = new Tokenizer ();
-        tokenizer.BuildTokenizer (tokenizer_path, transformer.config.vocab_size);
+        var tokenizer = Tokenizer.fromBinary (tokenizer_path, transformer.config.vocab_size);
 
         // Build the Sampler
         Sampler sampler = new Sampler (transformer.config.vocab_size, temperature, topp, rng_seed);
@@ -898,8 +515,6 @@ class Program
         // Run!
         if (mode == "generate") {
             Generator.Generate (transformer, tokenizer, sampler, prompt, steps);
-        } else if (mode == "chat") {
-            Generator.Chat (transformer, tokenizer, sampler, prompt, system_prompt, steps);
         } else {
             Console.Error.WriteLine ($"Unknown mode: {mode}");
             ErrorUsage ();
