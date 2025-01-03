@@ -28,7 +28,7 @@ static class TransformerModel
             index += p.dim;
         }
 
-        float[][] readQKV (int layer_size) {
+        float[][] readLayers (int layer_size) {
             var ret = new float[n_layers][];
             for (var l = 0; l < n_layers; l++) {
                 ret[l] = new float [layer_size];
@@ -39,10 +39,10 @@ static class TransformerModel
             return ret;
         }
 
-        w.wq = readQKV (p.dim * p.n_heads * head_size);
-        w.wk = readQKV (p.dim * p.n_kv_heads * head_size);
-        w.wv = readQKV (p.dim * p.n_kv_heads * head_size);
-        w.wo = readQKV (p.n_heads * head_size * p.dim);
+        w.wq = readLayers (p.dim * p.n_heads * head_size);
+        w.wk = readLayers (p.dim * p.n_kv_heads * head_size);
+        w.wv = readLayers (p.dim * p.n_kv_heads * head_size);
+        w.wo = readLayers (p.n_heads * head_size * p.dim);
 
         w.rms_ffn_weight = new float[n_layers][];
         for (var l = 0; l < n_layers; l++) {
@@ -51,17 +51,9 @@ static class TransformerModel
             index += p.dim;
         }
 
-        w.w1 = new float[n_layers * p.hidden_dim * p.dim];
-        Array.Copy (data, index, w.w1, 0, w.w1.Length);
-        index += w.w1.Length;
-
-        w.w2 = new float[n_layers * p.dim * p.hidden_dim];
-        Array.Copy (data, index, w.w2, 0, w.w2.Length);
-        index += w.w2.Length;
-
-        w.w3 = new float[n_layers * p.hidden_dim * p.dim];
-        Array.Copy (data, index, w.w3, 0, w.w3.Length);
-        index += w.w3.Length;
+        w.w1 = readLayers (p.hidden_dim * p.dim);
+        w.w2 = readLayers (p.dim * p.hidden_dim);
+        w.w3 = readLayers (p.hidden_dim * p.dim);
 
         w.rms_final_weight = new float[p.dim];
         Array.Copy (data, index, w.rms_final_weight, 0, w.rms_final_weight.Length);
@@ -269,8 +261,8 @@ static class TransformerModel
             math.RmsNorm (s.xb, s.x, w.rms_ffn_weight[l]);
 
             // FFN computation
-            MatMul (s.hb, s.xb, w.w1, l * p.hidden_dim * dim, dim, p.hidden_dim);
-            MatMul (s.hb2, s.xb, w.w3, l * p.hidden_dim * dim, dim, p.hidden_dim);
+            MatMul (s.hb, s.xb, w.w1[l], 0, dim, p.hidden_dim);
+            MatMul (s.hb2, s.xb, w.w3[l], 0, dim, p.hidden_dim);
 
             // SwiGLU activation
             for (var i = 0; i < p.hidden_dim; i++) {
@@ -281,7 +273,7 @@ static class TransformerModel
             }
 
             // Final FFN matmul
-            MatMul (s.xb, s.hb, w.w2, l * dim * p.hidden_dim, p.hidden_dim, dim);
+            MatMul (s.xb, s.hb, w.w2[l], 0, p.hidden_dim, dim);
 
             // Residual connection
             for (var i = 0; i < dim; i++) {

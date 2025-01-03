@@ -16,9 +16,9 @@ public class TransformerWeights
     public float[][] wo; // (n_layers, n_heads * head_size * dim)
 
     // Weights for FFN
-    public float[] w1; // (n_layers * hidden_dim * dim)
-    public float[] w2; // (n_layers * dim * hidden_dim)
-    public float[] w3; // (n_layers * hidden_dim * dim)
+    public float[][] w1; // (n_layers, hidden_dim * dim)
+    public float[][] w2; // (n_layers, dim * hidden_dim)
+    public float[][] w3; // (n_layers, hidden_dim * dim)
 
     // Final RMSNorm
     public float[] rms_final_weight; // (dim)
