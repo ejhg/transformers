@@ -26,10 +26,15 @@ static class TransformerModel
             }
         }
 
-        w.rms_att_weight = new float[n_layers][];
-        for (var l = 0; l < n_layers; l++) {
-            w.rms_att_weight[l] = new float[p.dim];
-            Array.Copy (data, index, w.rms_att_weight[l], 0, p.dim);
+        w.layers = new TransformerWeights.LayerWeights[n_layers]
+            .Select (_ => new TransformerWeights.LayerWeights ())
+            .ToArray ();
+
+        int l;
+
+        for (l = 0; l < n_layers; l++) {
+            w.layers[l].rms_att_weight = new float[p.dim];
+            Array.Copy (data, index, w.layers[l].rms_att_weight, 0, p.dim);
             index += p.dim;
         }
 
@@ -50,21 +55,46 @@ static class TransformerModel
             return ret;
         }
 
-        w.wq = readLayers2D (p.n_heads * head_size, p.dim);
-        w.wk = readLayers2D (p.n_kv_heads * head_size, p.dim);
-        w.wv = readLayers2D (p.n_kv_heads * head_size, p.dim);
-        w.wo = readLayers2D (p.dim, p.n_heads * head_size);
+        l = 0;
+        foreach (var wq in readLayers2D (p.n_heads * head_size, p.dim)) {
+            w.layers[l++].wq = wq;
+        }
 
-        w.rms_ffn_weight = new float[n_layers][];
-        for (var l = 0; l < n_layers; l++) {
-            w.rms_ffn_weight[l] = new float[p.dim];
-            Array.Copy (data, index, w.rms_ffn_weight[l], 0, p.dim);
+        l = 0;
+        foreach (var wk in readLayers2D (p.n_kv_heads * head_size, p.dim)) {
+            w.layers[l++].wk = wk;
+        }
+
+        l = 0;
+        foreach (var wv in readLayers2D (p.n_kv_heads * head_size, p.dim)) {
+            w.layers[l++].wv = wv;
+        }
+
+        l = 0;
+        foreach (var wo in readLayers2D (p.dim, p.n_heads * head_size)) {
+            w.layers[l++].wo = wo;
+        }
+
+        for (l = 0; l < n_layers; l++) {
+            w.layers[l].rms_ffn_weight = new float[p.dim];
+            Array.Copy (data, index, w.layers[l].rms_ffn_weight, 0, p.dim);
             index += p.dim;
         }
 
-        w.w1 = readLayers2D (p.hidden_dim, p.dim);
-        w.w2 = readLayers2D (p.dim, p.hidden_dim);
-        w.w3 = readLayers2D (p.hidden_dim, p.dim);
+        l = 0;
+        foreach (var w1 in readLayers2D (p.hidden_dim, p.dim)) {
+            w.layers[l++].w1 = w1;
+        }
+
+        l = 0;
+        foreach (var w2 in readLayers2D (p.dim, p.hidden_dim)) {
+            w.layers[l++].w2 = w2;
+        }
+
+        l = 0;
+        foreach (var w3 in readLayers2D (p.hidden_dim, p.dim)) {
+            w.layers[l++].w3 = w3;
+        }
 
         w.rms_final_weight = new float[p.dim];
         Array.Copy (data, index, w.rms_final_weight, 0, w.rms_final_weight.Length);
@@ -153,13 +183,16 @@ static class TransformerModel
 
         // Forward pass through layers
         for (var l = 0; l < p.n_layers; l++) {
+            var layer = w.layers[l];
+            var _cache = s.kv_cache[l];
+
             // Attention rmsnorm
-            math.RmsNorm (s.xb, s.x, w.rms_att_weight[l]);
+            math.RmsNorm (s.xb, s.x, layer.rms_att_weight);
 
             // Compute q, k, v
-            math.MatMul (s.q, s.xb, w.wq[l]);
-            math.MatMul (s.k, s.xb, w.wk[l]);
-            math.MatMul (s.v, s.xb, w.wv[l]);
+            math.MatMul (s.q, s.xb, layer.wq);
+            math.MatMul (s.k, s.xb, layer.wk);
+            math.MatMul (s.v, s.xb, layer.wv);
 
             // RoPE positional encoding
             for (var i = 0; i < dim; i += 2) {
@@ -201,13 +234,12 @@ static class TransformerModel
                         score += s.q[h, i] * s.kv_cache[l].key_cache[t, h * p.n_kv_heads / p.n_heads, i];
                     }
 
-                    score /= MathF.Sqrt (dim / p.n_heads);
+                    score /= MathF.Sqrt (head_size);
                     att[t] = score;
                 }
 
                 // Softmax the attention scores
-                int size = pos + 1;
-                math.Softmax (att, size);
+                math.Softmax (att, pos + 1);
 
                 // Zero out s.xb for this head
                 Array.Fill (s.xb, 0, h * (dim / p.n_heads), dim / p.n_heads);
@@ -221,7 +253,7 @@ static class TransformerModel
             }
 
             // Final matmul
-            math.MatMul (s.xb2, s.xb, w.wo[l]);
+            math.MatMul (s.xb2, s.xb, layer.wo);
 
             // Residual connection
             for (var i = 0; i < dim; i++) {
@@ -229,11 +261,11 @@ static class TransformerModel
             }
 
             // FFN rmsnorm
-            math.RmsNorm (s.xb, s.x, w.rms_ffn_weight[l]);
+            math.RmsNorm (s.xb, s.x, layer.rms_ffn_weight);
 
             // FFN computation
-            math.MatMul (s.hb, s.xb, w.w1[l]);
-            math.MatMul (s.hb2, s.xb, w.w3[l]);
+            math.MatMul (s.hb, s.xb, layer.w1);
+            math.MatMul (s.hb2, s.xb, layer.w3);
 
             // SwiGLU activation
             for (var i = 0; i < p.hidden_dim; i++) {
@@ -244,7 +276,7 @@ static class TransformerModel
             }
 
             // Final FFN matmul
-            math.MatMul (s.xb, s.hb, w.w2[l]);
+            math.MatMul (s.xb, s.hb, layer.w2);
 
             // Residual connection
             for (var i = 0; i < dim; i++) {
