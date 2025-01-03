@@ -14,25 +14,25 @@ public class Tokenizer : ITokenizer
 
     Dictionary<string, int> vocab_lookup;
 
-    string[] byte_pieces = new string[512];
-
     public int VocabSize => vocab.Length;
 
     public int PadId { get; }
 
     public int EosId { get; }
 
-    public static Tokenizer create (string tokenizer_path, int vocab_size) {
+    public static Tokenizer fromBinary (string tokenizer_path, int vocab_size) {
         var ret = new Tokenizer {
             vocab = new string[vocab_size],
             vocab_scores = new float[vocab_size],
-            vocab_lookup = null
+            vocab_lookup = null,
         };
+
+        var byte_pieces = new string[512];
 
         // Initialize byte pieces
         for (int i = 0; i < 256; i++) {
-            ret.byte_pieces[i * 2] = ((char)i).ToString ();
-            ret.byte_pieces[i * 2 + 1] = '\0'.ToString ();
+            byte_pieces[i * 2] = ((char)i).ToString ();
+            byte_pieces[i * 2 + 1] = '\0'.ToString ();
         }
 
         using FileStream fs = new FileStream (tokenizer_path, FileMode.Open, FileAccess.Read);
@@ -46,6 +46,10 @@ public class Tokenizer : ITokenizer
             var len = br.ReadInt32 ();
             ret.vocab[i] = Encoding.UTF8.GetString (br.ReadBytes (len));
         }
+
+        ret.vocab_lookup = ret.vocab
+            .Select ((str, index) => (str, index))
+            .ToDictionary ();
 
         return ret;
     }
@@ -81,12 +85,6 @@ public class Tokenizer : ITokenizer
     }
 
     int StrLookup (string str) {
-        if (vocab_lookup == null) {
-            vocab_lookup = vocab
-                .Select ((str, index) => (str, index))
-                .ToDictionary ();
-        }
-
         return vocab_lookup.GetValueOrDefault (str, -1);
     }
 
@@ -125,10 +123,9 @@ public class Tokenizer : ITokenizer
             }
 
             string str = str_buffer.ToString ();
-            int id = StrLookup (str);
 
-            if (id != -1) {
-                tokens.Add (id);
+            if (StrLookup (str) != -1) {
+                tokens.Add (StrLookup (str));
             } else {
                 foreach (char ch in str) {
                     tokens.Add ((byte)ch + 3);

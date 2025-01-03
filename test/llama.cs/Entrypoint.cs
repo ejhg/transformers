@@ -1,4 +1,5 @@
 using llama.torchsharp;
+using llama.torchsharp.tokenizer.llama3;
 
 namespace llama.cs;
 
@@ -6,6 +7,7 @@ enum TokenizerType
 {
     llama_cs,
     llama_3,
+    sentencepiece,
 }
 
 static class Entrypoint
@@ -29,9 +31,7 @@ static class Entrypoint
 
         var transformer = new model ();
 
-        var isBinarySerialized = modelWeightPath.EndsWith (".bin");
-
-        (transformer.config, transformer.weights) = isBinarySerialized
+        (transformer.config, transformer.weights) = modelWeightPath.EndsWith (".bin")
             ? BinModelLoader.load (modelWeightPath)
             : PickleModelLoader.load (
                 paramJsonPath: paramJsonPath,
@@ -43,8 +43,9 @@ static class Entrypoint
         }
 
         ITokenizer tokenizer = tokenizerType switch {
-            TokenizerType.llama_cs => Tokenizer.create (tokenizerModelPath, transformer.config.vocab_size),
-            TokenizerType.llama_3 => new torchsharp.tokenizer.llama3.Llama3Tokenizer (tokenizerModelPath),
+            TokenizerType.sentencepiece => new SentencePieceTokenizer (tokenizerModelPath),
+            TokenizerType.llama_cs => Tokenizer.fromBinary (tokenizerModelPath, transformer.config.vocab_size),
+            TokenizerType.llama_3 => new Llama3Tokenizer (tokenizerModelPath),
         };
 
         var sampler = new Sampler (transformer.config.vocab_size, temperature, topp, rng_seed);

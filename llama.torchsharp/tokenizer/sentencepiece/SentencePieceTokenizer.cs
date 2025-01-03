@@ -2,7 +2,7 @@ using Tiktoken;
 
 namespace llama.torchsharp.tokenizer.llama3;
 
-public class Llama3Tokenizer : ITokenizer
+public class SentencePieceTokenizer : ITokenizer
 {
     const int num_reserved_special_tokens = 256;
 
@@ -18,16 +18,12 @@ public class Llama3Tokenizer : ITokenizer
 
     int BosId { get; }
 
-    public Llama3Tokenizer (string modelPath) {
-        var mergeable_ranks = File
-            .ReadAllLines (modelPath)
-            .Where (_ => !string.IsNullOrEmpty (_))
-            .Select (line => {
-                var p = line.Split ();
-                var token = Convert.FromBase64String (p[0]);
-                var rank = int.Parse (p[1]);
-                return (token, rank);
-            })
+    public SentencePieceTokenizer (string modelPath) {
+        var model = SentencePieceModelParser.Parse (File.ReadAllBytes (modelPath));
+
+        var mergeable_ranks = model.SentencePieces
+            .OrderBy (_ => _.Score)
+            .Select ((_, index) => (System.Text.Encoding.UTF8.GetBytes (_.Piece), index))
             .ToDictionary ();
 
         var num_base_tokens = mergeable_ranks.Count;

@@ -15,11 +15,18 @@ public class PickleModelLoader
         using var fileStream = File.OpenRead (modelWeightPath);
         var hashtable = DelayedExecutionUnpickler.UnpickleStateDict (fileStream, leaveOpen: true);
 
-        foreach (var key in hashtable.Keys.Cast<string> ().ToArray ().Order ()) {
-            Console.WriteLine(key);
-        }
+        var lookup = hashtable.Keys.Cast<string> ().ToArray ().Select (key => {
+            // FIX: to support stories-260k
+            var _key = key.StartsWith ("_orig_mod.")
+                ? key.Replace ("_orig_mod.", "")
+                : key;
+            return (_key, hashtable[key]);
+        }).ToDictionary ();
 
-        (int[] shape, float[] floats) unpickle (string key) => PickleLoader.readTensor (((Func<object[]>)hashtable[key]) (), key);
+        (int[] shape, float[] floats) unpickle (string key) {
+            Console.WriteLine (key);
+            return PickleLoader.readTensor (((Func<object[]>)lookup[key]) (), key);
+        }
 
         var hiddenDim = (int)((json.ffn_dim_multiplier ?? 1) * 2 * (json.dim * 4) / 3);
         // Round the hidden_dim to the nearest multiple of the multiple_of parameter
