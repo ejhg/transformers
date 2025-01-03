@@ -39,10 +39,27 @@ static class TransformerModel
             return ret;
         }
 
-        w.wq = readLayers (p.dim * p.n_heads * head_size);
-        w.wk = readLayers (p.dim * p.n_kv_heads * head_size);
-        w.wv = readLayers (p.dim * p.n_kv_heads * head_size);
-        w.wo = readLayers (p.n_heads * head_size * p.dim);
+        float[][,] readLayers2D (int dim1, int dim2) {
+            var ret = new float[n_layers][,];
+            for (var l = 0; l < n_layers; l++) {
+                ret[l] = new float [dim1, dim2];
+
+                for (var i = 0; i < dim1; i++) {
+                    for (var j = 0; j < dim2; j++) {
+                        ret[l][i, j] = data[index + i * dim2 + j];
+                    }
+                }
+
+                index += dim1 * dim2;
+            }
+
+            return ret;
+        }
+
+        w.wq = readLayers2D (p.n_heads * head_size, p.dim);
+        w.wk = readLayers2D (p.n_kv_heads * head_size, p.dim);
+        w.wv = readLayers2D (p.n_kv_heads * head_size, p.dim);
+        w.wo = readLayers2D (p.dim, p.n_heads * head_size);
 
         w.rms_ffn_weight = new float[n_layers][];
         for (var l = 0; l < n_layers; l++) {
@@ -68,7 +85,6 @@ static class TransformerModel
         } else {
             w.wcls = new float[p.vocab_size * p.dim];
             Array.Copy (data, index, w.wcls, 0, w.wcls.Length);
-            index += w.wcls.Length;
         }
     }
 
@@ -126,8 +142,6 @@ static class TransformerModel
     }
 
     static void MatMul (float[] xout, float[] x, float[] w, int wOffset, int n, int d) {
-        // W (d,n) @ x (n,) -> xout (d,)
-
         if (x.Length > 1000) {
             Parallel.For (0, d, i => {
                 var val = 0.0f;
@@ -153,15 +167,26 @@ static class TransformerModel
         }
     }
 
-    static void MatMul (float[,] xout, float[] x, float[] w, int wOffset, int n, int d) {
+    static void MatMul (float[] xout, float[] x, float[,] w, int wOffset, int n, int d) {
+        for (var i = 0; i < d; i++) {
+            var val = 0.0f;
+
+            for (var j = 0; j < n; j++) {
+                val += w[i, j] * x[j];
+            }
+
+            xout[i] = val;
+        }
+    }
+
+    static void MatMul (float[,] xout, float[] x, float[,] w, int wOffset, int n, int d) {
         var size = xout.GetLength (0);
 
         for (var i = 0; i < d; i++) {
             var val = 0.0f;
-            var ptr = wOffset + i * n;
 
             for (var j = 0; j < n; j++) {
-                val += w[ptr + j] * x[j];
+                val += w[i, j] * x[j];
             }
 
             xout[i / size, i % size] = val;
