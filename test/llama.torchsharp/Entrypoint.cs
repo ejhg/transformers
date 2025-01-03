@@ -6,7 +6,12 @@ namespace llama.torchsharp;
 
 static class Entrypoint
 {
-    public static void run (string weightsDir, string llamaResourcesDir) {
+    public static void run (
+        string weightsDir,
+        string llamaResourcesDir,
+        string weightsFile,
+        string prompt
+    ) {
         var device = "cpu";
 
         torch.manual_seed (100);
@@ -25,10 +30,11 @@ static class Entrypoint
             tokenizer: tokenizer,
             maxSeqLen: 128,
             maxBatchSize: 1,
-            device: device);
+            device: device,
+            modelWeightPath: weightsFile);
 
         var prompts = new[] {
-            "I believe the meaning of life is",
+            prompt,
         };
 
         var result = Inference.TextCompletion (

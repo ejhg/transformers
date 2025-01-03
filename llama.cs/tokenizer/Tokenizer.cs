@@ -51,9 +51,16 @@ public class Tokenizer : ITokenizer
     }
 
     public string Decode (int[] tokens) {
-        var token = tokens[^1];
-        var prev_token = tokens[^2];
+        var prev_token = 0;
 
+        return string.Join ("", tokens.Select (token => {
+            var ret = decode (token, prev_token);
+            prev_token = token;
+            return ret;
+        }));
+    }
+
+    string decode (int token, int prev_token) {
         string piece = vocab[token];
         if (prev_token == 1 && piece.StartsWith (" ")) {
             piece = piece.Substring (1);
