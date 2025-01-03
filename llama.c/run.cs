@@ -3,17 +3,6 @@ using llama.torchsharp;
 
 namespace llama.c;
 
-public class Config
-{
-    public int dim; // Transformer dimension
-    public int hidden_dim; // For FFN layers
-    public int n_layers; // Number of layers
-    public int n_heads; // Number of query heads
-    public int n_kv_heads; // Number of key/value heads
-    public int vocab_size; // Vocabulary size, usually 256 (byte-level)
-    public int seq_len; // Max sequence length
-}
-
 public class TransformerWeights
 {
     // Token embedding table
@@ -61,15 +50,15 @@ public class RunState
 
 public class Transformer
 {
-    public Config config; // Hyperparameters
+    public config config; // Hyperparameters
     public TransformerWeights weights; // Model weights
     public RunState state; // Run state buffers
 }
 
 static class TransformerModel
 {
-    static void MallocRunState (RunState s, Config p) {
-        int kv_dim = (p.dim * p.n_kv_heads) / p.n_heads;
+    static void MallocRunState (RunState s, config p) {
+        var kv_dim = (p.dim * p.n_kv_heads) / p.n_heads;
         s.x = new float[p.dim];
         s.xb = new float[p.dim];
         s.xb2 = new float[p.dim];
@@ -83,8 +72,8 @@ static class TransformerModel
         s.value_cache = new float[p.n_layers * p.seq_len * kv_dim];
     }
 
-    static void MemoryMapWeights (TransformerWeights w, Config p, float[] data, int shared_weights) {
-        int head_size = p.dim / p.n_heads;
+    static void MemoryMapWeights (TransformerWeights w, config p, float[] data, int shared_weights) {
+        var head_size = p.dim / p.n_heads;
         long n_layers = p.n_layers;
         long index = 0;
 
@@ -145,9 +134,9 @@ static class TransformerModel
         }
     }
 
-    static void ReadCheckpoint (string checkpoint, Config config, TransformerWeights weights, out float[] data, out long file_size) {
-        using FileStream fs = new FileStream (checkpoint, FileMode.Open, FileAccess.Read);
-        using BinaryReader br = new BinaryReader (fs);
+    static void ReadCheckpoint (string checkpoint, config config, TransformerWeights weights, out float[] data, out long file_size) {
+        using var fs = new FileStream (checkpoint, FileMode.Open, FileAccess.Read);
+        using var br = new BinaryReader (fs);
 
         // Read config
         config.dim = br.ReadInt32 ();
@@ -158,15 +147,15 @@ static class TransformerModel
         config.vocab_size = br.ReadInt32 ();
         config.seq_len = br.ReadInt32 ();
 
-        int shared_weights = config.vocab_size > 0 ? 1 : 0;
+        var shared_weights = config.vocab_size > 0 ? 1 : 0;
         config.vocab_size = Math.Abs (config.vocab_size);
 
         file_size = fs.Length;
 
         // Read data
-        int dataSize = (int)((file_size - 7 * sizeof(int)) / sizeof(float)); // 7 ints in Config
+        var dataSize = (int)((file_size - 7 * sizeof(int)) / sizeof(float)); // 7 ints in Config
         data = new float[dataSize];
-        for (int i = 0; i < dataSize; i++) {
+        for (var i = 0; i < dataSize; i++) {
             data[i] = br.ReadSingle ();
         }
 
@@ -175,7 +164,7 @@ static class TransformerModel
     }
 
     public static void BuildTransformer (Transformer t, string checkpoint_path) {
-        t.config = new Config ();
+        t.config = new config ();
         t.weights = new TransformerWeights ();
         t.state = new RunState ();
 
@@ -185,8 +174,8 @@ static class TransformerModel
 
     static void RmsNorm (float[] o, float[] x, float[] weight, int weightOffset, int size) {
         // Calculate sum of squares
-        float ss = 0.0f;
-        for (int j = 0; j < size; j++) {
+        var ss = 0.0f;
+        for (var j = 0; j < size; j++) {
             ss += x[j] * x[j];
         }
 
@@ -195,29 +184,29 @@ static class TransformerModel
         ss = 1.0f / MathF.Sqrt (ss);
 
         // Normalize and scale
-        for (int j = 0; j < size; j++) {
+        for (var j = 0; j < size; j++) {
             o[j] = weight[weightOffset + j] * (ss * x[j]);
         }
     }
 
     public static void Softmax (float[] x, int size) {
         // Find max value
-        float max_val = x[0];
-        for (int i = 1; i < size; i++) {
+        var max_val = x[0];
+        for (var i = 1; i < size; i++) {
             if (x[i] > max_val) {
                 max_val = x[i];
             }
         }
 
         // Exponentiate and sum
-        float sum = 0.0f;
-        for (int i = 0; i < size; i++) {
+        var sum = 0.0f;
+        for (var i = 0; i < size; i++) {
             x[i] = MathF.Exp (x[i] - max_val);
             sum += x[i];
         }
 
         // Normalize
-        for (int i = 0; i < size; i++) {
+        for (var i = 0; i < size; i++) {
             x[i] /= sum;
         }
     }
@@ -226,10 +215,10 @@ static class TransformerModel
         // W (d,n) @ x (n,) -> xout (d,)
 
         Parallel.For (0, d, i => {
-            float val = 0.0f;
+            var val = 0.0f;
             var ptr = wOffset + i * n;
 
-            for (int j = 0; j < n; j++) {
+            for (var j = 0; j < n; j++) {
                 val += w[ptr + j] * x[j];
             }
 
@@ -239,28 +228,27 @@ static class TransformerModel
 
     public static float[] Forward (Transformer transformer, int token, int pos) {
         // Convenience variables
-        Config p = transformer.config;
-        TransformerWeights w = transformer.weights;
-        RunState s = transformer.state;
-        float[] x = s.x;
-        int dim = p.dim;
-        int kv_dim = (p.dim * p.n_kv_heads) / p.n_heads;
-        int kv_mul = p.n_heads / p.n_kv_heads;
-        int hidden_dim = p.hidden_dim;
-        int head_size = dim / p.n_heads;
+        var p = transformer.config;
+        var w = transformer.weights;
+        var s = transformer.state;
+        var x = s.x;
+        var dim = p.dim;
+        var kv_dim = (p.dim * p.n_kv_heads) / p.n_heads;
+        var kv_mul = p.n_heads / p.n_kv_heads;
+        var head_size = dim / p.n_heads;
 
         // Copy token embedding into x
         Array.Copy (w.token_embedding_table, token * dim, x, 0, dim);
 
         // Forward pass through layers
-        for (int l = 0; l < p.n_layers; l++) {
+        for (var l = 0; l < p.n_layers; l++) {
             // Attention rmsnorm
             RmsNorm (s.xb, x, w.rms_att_weight, l * dim, dim);
 
             // Key and value cache offsets
-            int loff = l * p.seq_len * kv_dim;
-            int kOffset = loff + pos * kv_dim;
-            int vOffset = loff + pos * kv_dim;
+            var loff = l * p.seq_len * kv_dim;
+            var kOffset = loff + pos * kv_dim;
+            var vOffset = loff + pos * kv_dim;
 
             // Compute q, k, v
             MatMul (s.q, s.xb, w.wq, l * dim * p.n_heads * head_size, dim, p.n_heads * head_size);
@@ -268,19 +256,19 @@ static class TransformerModel
             MatMul (s.v, s.xb, w.wv, l * dim * p.n_kv_heads * head_size, dim, p.n_kv_heads * head_size);
 
             // RoPE positional encoding
-            for (int i = 0; i < p.n_heads * head_size; i += 2) {
-                int head_dim = i % head_size;
-                float freq = 1.0f / MathF.Pow (10000.0f, head_dim / (float)head_size);
-                float val = pos * freq;
-                float fcr = MathF.Cos (val);
-                float fci = MathF.Sin (val);
-                int rotn = i < p.n_kv_heads * head_size ? 2 : 1; // Rotate q and k
-                for (int v = 0; v < rotn; v++) {
+            for (var i = 0; i < p.n_heads * head_size; i += 2) {
+                var head_dim = i % head_size;
+                var freq = 1.0f / MathF.Pow (10000.0f, head_dim / (float)head_size);
+                var val = pos * freq;
+                var fcr = MathF.Cos (val);
+                var fci = MathF.Sin (val);
+                var rotn = i < p.n_kv_heads * head_size ? 2 : 1; // Rotate q and k
+                for (var v = 0; v < rotn; v++) {
                     var dst = v == 0
                         ? s.q
                         : s.k;
-                    float v0 = dst[i];
-                    float v1 = dst[i + 1];
+                    var v0 = dst[i];
+                    var v1 = dst[i + 1];
                     dst[i] = v0 * fcr - v1 * fci;
                     dst[i + 1] = v0 * fci + v1 * fcr;
                 }
@@ -291,22 +279,22 @@ static class TransformerModel
             Array.Copy (s.v, 0, s.value_cache, vOffset, kv_dim);
 
             // Multihead attention
-            for (int h = 0; h < p.n_heads; h++) {
-                int headOffset = h * head_size;
+            for (var h = 0; h < p.n_heads; h++) {
+                var headOffset = h * head_size;
 
                 // Indices for q
-                int qStart = headOffset;
+                var qStart = headOffset;
 
                 // Initialize attention scores
-                float[] att = new float[pos + 1];
+                var att = new float[pos + 1];
 
                 // Iterate over all timesteps
-                for (int t = 0; t <= pos; t++) {
-                    int kHeadOffset = loff + t * kv_dim + (h / kv_mul) * head_size;
+                for (var t = 0; t <= pos; t++) {
+                    var kHeadOffset = loff + t * kv_dim + (h / kv_mul) * head_size;
 
                     // Dot product between q and k
-                    float score = 0.0f;
-                    for (int i = 0; i < head_size; i++) {
+                    var score = 0.0f;
+                    for (var i = 0; i < head_size; i++) {
                         score += s.q[qStart + i] * s.key_cache[kHeadOffset + i];
                     }
 
@@ -320,11 +308,11 @@ static class TransformerModel
                 // Zero out s.xb for this head
                 Array.Fill (s.xb, 0, headOffset, head_size);
 
-                for (int t = 0; t <= pos; t++) {
-                    int vHeadOffset = loff + t * kv_dim + (h / kv_mul) * head_size;
+                for (var t = 0; t <= pos; t++) {
+                    var vHeadOffset = loff + t * kv_dim + (h / kv_mul) * head_size;
 
-                    float a = att[t];
-                    for (int i = 0; i < head_size; i++) {
+                    var a = att[t];
+                    for (var i = 0; i < head_size; i++) {
                         s.xb[headOffset + i] += a * s.value_cache[vHeadOffset + i];
                     }
                 }
@@ -334,7 +322,7 @@ static class TransformerModel
             MatMul (s.xb2, s.xb, w.wo, l * p.n_heads * head_size * dim, p.n_heads * head_size, dim);
 
             // Residual connection
-            for (int i = 0; i < dim; i++) {
+            for (var i = 0; i < dim; i++) {
                 x[i] += s.xb2[i];
             }
 
@@ -346,8 +334,8 @@ static class TransformerModel
             MatMul (s.hb2, s.xb, w.w3, l * p.hidden_dim * dim, dim, p.hidden_dim);
 
             // SwiGLU activation
-            for (int i = 0; i < p.hidden_dim; i++) {
-                float val = s.hb[i];
+            for (var i = 0; i < p.hidden_dim; i++) {
+                var val = s.hb[i];
                 val *= 1.0f / (1.0f + MathF.Exp (-val)); // SiLU activation
                 val *= s.hb2[i];
                 s.hb[i] = val;
@@ -357,7 +345,7 @@ static class TransformerModel
             MatMul (s.xb, s.hb, w.w2, l * dim * p.hidden_dim, p.hidden_dim, dim);
 
             // Residual connection
-            for (int i = 0; i < dim; i++) {
+            for (var i = 0; i < dim; i++) {
                 x[i] += s.xb[i];
             }
         }
@@ -391,11 +379,11 @@ public class Generator
         var tokens = tokenizer.Encode (prompt, true, false);
 
         long start = 0;
-        int next = 0;
-        int pos = 0;
+        var next = 0;
+        var pos = 0;
 
         while (pos < steps) {
-            float[] logits = TransformerModel.Forward (transformer, tokens[pos], pos);
+            var logits = TransformerModel.Forward (transformer, tokens[pos], pos);
 
             if (pos < tokens.Length - 1) {
                 next = tokens[pos + 1];
@@ -416,7 +404,7 @@ public class Generator
         Console.WriteLine ();
 
         if (pos > 1) {
-            long end = DateTimeOffset.Now.ToUnixTimeMilliseconds ();
+            var end = DateTimeOffset.Now.ToUnixTimeMilliseconds ();
             Console.Error.WriteLine ($"Achieved tok/s: {(pos - 1) / ((end - start) / 1000.0)}");
         }
     }
@@ -442,13 +430,13 @@ class Program
     public static void main (params string[] args) {
         // Default parameters
         string checkpoint_path = null;
-        string tokenizer_path = "resources/tokenizer.bin";
-        float temperature = 1.0f;
-        float topp = 0.9f;
-        int steps = 256;
+        var tokenizer_path = "resources/tokenizer.bin";
+        var temperature = 1.0f;
+        var topp = 0.9f;
+        var steps = 256;
         string prompt = null;
-        int rng_seed = 0;
-        string mode = "generate";
+        var rng_seed = 0;
+        var mode = "generate";
         string system_prompt = null;
 
         if (args.Length >= 1) {
@@ -458,7 +446,7 @@ class Program
         }
 
         // Argument parsing
-        for (int i = 1; i < args.Length; i += 2) {
+        for (var i = 1; i < args.Length; i += 2) {
             if (i + 1 >= args.Length) ErrorUsage ();
             if (args[i][0] != '-') ErrorUsage ();
             if (args[i].Length != 2) ErrorUsage ();
@@ -500,7 +488,7 @@ class Program
         if (steps < 0) steps = 0;
 
         // Build the Transformer via the model .bin file
-        Transformer transformer = new Transformer ();
+        var transformer = new Transformer ();
         TransformerModel.BuildTransformer (transformer, checkpoint_path);
         if (steps == 0 || steps > transformer.config.seq_len) {
             steps = transformer.config.seq_len;
@@ -510,7 +498,7 @@ class Program
         var tokenizer = Tokenizer.fromBinary (tokenizer_path, transformer.config.vocab_size);
 
         // Build the Sampler
-        Sampler sampler = new Sampler (transformer.config.vocab_size, temperature, topp, rng_seed);
+        var sampler = new Sampler (transformer.config.vocab_size, temperature, topp, rng_seed);
 
         // Run!
         if (mode == "generate") {
