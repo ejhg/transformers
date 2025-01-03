@@ -17,9 +17,14 @@ static class TransformerModel
         long n_layers = p.n_layers;
         long index = 0;
 
-        w.token_embedding_table = new float[p.vocab_size * p.dim];
-        Array.Copy (data, index, w.token_embedding_table, 0, w.token_embedding_table.Length);
-        index += w.token_embedding_table.Length;
+        // Token embedding table
+        w.token_embedding_table = new float[p.vocab_size][];
+        for (int i = 0; i < p.vocab_size; i++) {
+            w.token_embedding_table[i] = new float[p.dim];
+            for (int j = 0; j < p.dim; j++) {
+                w.token_embedding_table[i][j] = data[index++];
+            }
+        }
 
         w.rms_att_weight = new float[n_layers][];
         for (var l = 0; l < n_layers; l++) {
@@ -72,8 +77,12 @@ static class TransformerModel
         if (shared_weights != 0) {
             w.wcls = w.token_embedding_table;
         } else {
-            w.wcls = new float[p.vocab_size * p.dim];
-            Array.Copy (data, index, w.wcls, 0, w.wcls.Length);
+            w.wcls = new float[p.vocab_size][];
+            for (int i = 0; i < p.vocab_size; i++) {
+                w.wcls[i] = new float[p.dim];
+                for (int j = 0; j < p.dim; j++)
+                    w.wcls[i][j] = data[index++];
+            }
         }
     }
 
@@ -130,44 +139,6 @@ static class TransformerModel
             }).ToArray ();
     }
 
-    static void MatMul (float[] xout, float[] x, float[] w, int wOffset, int n, int d) {
-        if (x.Length > 1000) {
-            Parallel.For (0, d, i => {
-                var val = 0.0f;
-                var ptr = wOffset + i * n;
-
-                for (var j = 0; j < n; j++) {
-                    val += w[ptr + j] * x[j];
-                }
-
-                xout[i] = val;
-            });
-        } else {
-            for (var i = 0; i < d; i++) {
-                var val = 0.0f;
-                var ptr = wOffset + i * n;
-
-                for (var j = 0; j < n; j++) {
-                    val += w[ptr + j] * x[j];
-                }
-
-                xout[i] = val;
-            }
-        }
-    }
-
-    static void MatMul (float[] xout, float[] x, float[,] w, int n, int d) {
-        for (var i = 0; i < d; i++) {
-            var val = 0.0f;
-
-            for (var j = 0; j < n; j++) {
-                val += w[i, j] * x[j];
-            }
-
-            xout[i] = val;
-        }
-    }
-
     public static float[] Forward (Transformer transformer, int token, int pos) {
         var p = transformer.config;
         var w = transformer.weights;
@@ -178,7 +149,7 @@ static class TransformerModel
         var kv_dim = head_size * p.n_kv_heads;
 
         // Copy token embedding into x
-        Array.Copy (w.token_embedding_table, token * dim, s.x, 0, dim);
+        Array.Copy (w.token_embedding_table[token], 0, s.x, 0, dim);
 
         // Forward pass through layers
         for (var l = 0; l < p.n_layers; l++) {
@@ -250,7 +221,7 @@ static class TransformerModel
             }
 
             // Final matmul
-            MatMul (s.xb2, s.xb, w.wo[l], dim, dim);
+            math.MatMul (s.xb2, s.xb, w.wo[l]);
 
             // Residual connection
             for (var i = 0; i < dim; i++) {
@@ -285,7 +256,7 @@ static class TransformerModel
         math.RmsNorm (s.x, s.x, w.rms_final_weight);
 
         // Classifier into logits
-        MatMul (s.logits, s.x, w.wcls, 0, p.dim, p.vocab_size);
+        math.MatMul (s.logits, s.x, w.wcls);
         return s.logits;
     }
 }

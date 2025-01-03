@@ -3,7 +3,7 @@ namespace llama.c;
 public class TransformerWeights
 {
     // Token embedding table
-    public float[] token_embedding_table; // [vocab_size * dim]
+    public float[][] token_embedding_table; // [vocab_size * dim]
 
     // Weights for RMSNorms
     public float[][] rms_att_weight; // [n_layers * dim]
@@ -24,5 +24,5 @@ public class TransformerWeights
     public float[] rms_final_weight; // [dim]
 
     // Classifier weights for the logits
-    public float[] wcls; // [vocab_size, dim]
+    public float[][] wcls; // [vocab_size, dim]
 }
