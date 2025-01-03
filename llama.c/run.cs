@@ -28,21 +28,21 @@ static class TransformerModel
             index += p.dim;
         }
 
-        w.wq = new float[n_layers * p.dim * p.n_heads * head_size];
-        Array.Copy (data, index, w.wq, 0, w.wq.Length);
-        index += w.wq.Length;
+        float[][] readQKV (int layer_size) {
+            var ret = new float[n_layers][];
+            for (var l = 0; l < n_layers; l++) {
+                ret[l] = new float [layer_size];
+                Array.Copy (data, index, ret[l], 0, ret[l].Length);
+                index += ret[l].Length;
+            }
 
-        w.wk = new float[n_layers * p.dim * p.n_kv_heads * head_size];
-        Array.Copy (data, index, w.wk, 0, w.wk.Length);
-        index += w.wk.Length;
+            return ret;
+        }
 
-        w.wv = new float[n_layers * p.dim * p.n_kv_heads * head_size];
-        Array.Copy (data, index, w.wv, 0, w.wv.Length);
-        index += w.wv.Length;
-
-        w.wo = new float[n_layers * p.n_heads * head_size * p.dim];
-        Array.Copy (data, index, w.wo, 0, w.wo.Length);
-        index += w.wo.Length;
+        w.wq = readQKV (p.dim * p.n_heads * head_size);
+        w.wk = readQKV (p.dim * p.n_kv_heads * head_size);
+        w.wv = readQKV (p.dim * p.n_kv_heads * head_size);
+        w.wo = readQKV (p.n_heads * head_size * p.dim);
 
         w.rms_ffn_weight = new float[n_layers][];
         for (var l = 0; l < n_layers; l++) {
@@ -177,27 +177,26 @@ static class TransformerModel
     }
 
     public static float[] Forward (Transformer transformer, int token, int pos) {
-        // Convenience variables
         var p = transformer.config;
         var w = transformer.weights;
         var s = transformer.state;
-        var x = s.x;
+
         var dim = p.dim;
         var head_size = p.dim / p.n_heads;
         var kv_dim = head_size * p.n_kv_heads;
 
         // Copy token embedding into x
-        Array.Copy (w.token_embedding_table, token * dim, x, 0, dim);
+        Array.Copy (w.token_embedding_table, token * dim, s.x, 0, dim);
 
         // Forward pass through layers
         for (var l = 0; l < p.n_layers; l++) {
             // Attention rmsnorm
-            math.RmsNorm (s.xb, x, w.rms_att_weight[l]);
+            math.RmsNorm (s.xb, s.x, w.rms_att_weight[l]);
 
             // Compute q, k, v
-            MatMul (s.q, s.xb, w.wq, l * dim * dim, dim, dim);
-            MatMul (s.k, s.xb, w.wk, l * dim * kv_dim, dim, kv_dim);
-            MatMul (s.v, s.xb, w.wv, l * dim * kv_dim, dim, kv_dim);
+            MatMul (s.q, s.xb, w.wq[l], 0, dim, dim);
+            MatMul (s.k, s.xb, w.wk[l], 0, dim, kv_dim);
+            MatMul (s.v, s.xb, w.wv[l], 0, dim, kv_dim);
 
             // RoPE positional encoding
             for (var i = 0; i < dim; i += 2) {
@@ -259,15 +258,15 @@ static class TransformerModel
             }
 
             // Final matmul
-            MatMul (s.xb2, s.xb, w.wo, l * dim * dim, dim, dim);
+            MatMul (s.xb2, s.xb, w.wo[l], 0, dim, dim);
 
             // Residual connection
             for (var i = 0; i < dim; i++) {
-                x[i] += s.xb2[i];
+                s.x[i] += s.xb2[i];
             }
 
             // FFN rmsnorm
-            math.RmsNorm (s.xb, x, w.rms_ffn_weight[l]);
+            math.RmsNorm (s.xb, s.x, w.rms_ffn_weight[l]);
 
             // FFN computation
             MatMul (s.hb, s.xb, w.w1, l * p.hidden_dim * dim, dim, p.hidden_dim);
@@ -286,15 +285,15 @@ static class TransformerModel
 
             // Residual connection
             for (var i = 0; i < dim; i++) {
-                x[i] += s.xb[i];
+                s.x[i] += s.xb[i];
             }
         }
 
         // Final rmsnorm
-        math.RmsNorm (x, x, w.rms_final_weight);
+        math.RmsNorm (s.x, s.x, w.rms_final_weight);
 
         // Classifier into logits
-        MatMul (s.logits, x, w.wcls, 0, p.dim, p.vocab_size);
+        MatMul (s.logits, s.x, w.wcls, 0, p.dim, p.vocab_size);
         return s.logits;
     }
 }

@@ -10,10 +10,10 @@ public class TransformerWeights
     public float[][] rms_ffn_weight; // (n_layers * dim)
 
     // Weights for matmuls. note dim == n_heads * head_size
-    public float[] wq; // (n_layers * dim * n_heads * head_size)
-    public float[] wk; // (n_layers * dim * n_kv_heads * head_size)
-    public float[] wv; // (n_layers * dim * n_kv_heads * head_size)
-    public float[] wo; // (n_layers * n_heads * head_size * dim)
+    public float[][] wq; // (n_layers, dim * n_heads * head_size)
+    public float[][] wk; // (n_layers, dim * n_kv_heads * head_size)
+    public float[][] wv; // (n_layers, dim * n_kv_heads * head_size)
+    public float[][] wo; // (n_layers, n_heads * head_size * dim)
 
     // Weights for FFN
     public float[] w1; // (n_layers * hidden_dim * dim)
