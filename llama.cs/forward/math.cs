@@ -110,37 +110,32 @@ public class math
     }
 
     public static unsafe void MatMul (float[,] xout, float[] x, float[,] W) {
-        var size = xout.GetLength (1);
+        var out_size = xout.GetLength (1);
+        var h = W.GetLength (0);
+        var w = W.GetLength (1);
 
         if (x.Length > 1000) {
-            Parallel.For (0, xout.Length, i => {
-                int n = x.Length;
-
+            Parallel.For (0, h, i => {
                 fixed (float* pW = W) {
                     float val = 0.0f;
-                    float* pRowW = pW + i * n;
+                    float* pRowW = pW + i * w;
 
-                    for (int j = 0; j < n; j++) {
+                    for (int j = 0; j < w; j++) {
                         val += pRowW[j] * x[j];
                     }
 
-                    xout[i / size, i % size] = val;
+                    xout[i / out_size, i % out_size] = val;
                 }
             });
         } else {
-            for (var i = 0; i < xout.Length; i++) {
-                int n = x.Length;
+            for (var i = 0; i < h; i++) {
+                float val = 0.0f;
 
-                fixed (float* pW = W) {
-                    float val = 0.0f;
-                    float* pRowW = pW + i * n;
-
-                    for (int j = 0; j < n; j++) {
-                        val += pRowW[j] * x[j];
-                    }
-
-                    xout[i / size, i % size] = val;
+                for (int j = 0; j < w; j++) {
+                    val += W[i, j] * x[j];
                 }
+
+                xout[i / out_size, i % out_size] = val;
             }
         }
     }
