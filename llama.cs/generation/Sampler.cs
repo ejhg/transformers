@@ -99,7 +99,7 @@ public class Sampler
             logits[i] /= temperature;
         }
 
-        ForwardPass.Softmax (logits, logits.Length);
+        math.Softmax (logits, logits.Length);
 
         if (topp <= 0 || topp >= 1) {
             return SampleMult (logits);

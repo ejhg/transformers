@@ -2,82 +2,6 @@ namespace llama.cs;
 
 static class ForwardPass
 {
-    static void RmsNorm (float[] o, float[] x, float[] weight) {
-        var size = x.Length;
-
-        // Calculate sum of squares
-        float sumOfSquaresOfX = 0.0f;
-        for (int j = 0; j < size; j++) {
-            sumOfSquaresOfX += x[j] * x[j];
-        }
-
-        var scaleX = 1.0f / MathF.Sqrt (sumOfSquaresOfX / size + 1e-5f);
-
-        // Normalize and scale
-        for (int j = 0; j < size; j++) {
-            o[j] = weight[j] * (scaleX * x[j]);
-        }
-    }
-
-    public static void Softmax (float[] x, int size) {
-        // Find max value
-        float max_val = x[0];
-        for (int i = 1; i < size; i++) {
-            if (x[i] > max_val) {
-                max_val = x[i];
-            }
-        }
-
-        // Exponentiate and sum
-        float sum = 0.0f;
-        for (int i = 0; i < size; i++) {
-            x[i] = MathF.Exp (x[i] - max_val);
-            sum += x[i];
-        }
-
-        // Normalize
-        for (int i = 0; i < size; i++) {
-            x[i] /= sum;
-        }
-    }
-
-    /**
-     * W (m,n) @ x (n,) -> xout (m,)
-     */
-    static void MatMul (float[] xout, float[] x, float[][] W) {
-        Parallel.For (0, xout.Length, i => {
-            float val = 0.0f;
-            int n = x.Length;
-            var row = W[i];
-
-            for (int j = 0; j < n; j++) {
-                val += row[j] * x[j];
-            }
-
-            xout[i] = val;
-        });
-    }
-
-    /**
-     * W (m,n) @ x (n,) -> xout (m,)
-     */
-    static unsafe void MatMul (float[] xout, float[] x, float[,] W) {
-        Parallel.For (0, xout.Length, i => {
-            int n = x.Length;
-
-            fixed (float* pW = W) {
-                float val = 0.0f;
-                float* pRowW = pW + i * n;
-
-                for (int j = 0; j < n; j++) {
-                    val += pRowW[j] * x[j];
-                }
-
-                xout[i] = val;
-            }
-        });
-    }
-
     public static float[] Forward (model model, int token, int pos) {
         // Convenience variables
         config p = model.config;
@@ -95,12 +19,12 @@ static class ForwardPass
             var _cache = s.kv_cache[l];
 
             // Attention rmsnorm
-            RmsNorm (s.xb, s.x, layer.rms_att_weight);
+            math.RmsNorm (s.xb, s.x, layer.rms_att_weight);
 
             // Compute q, k, v
-            MatMul (s.q, s.xb, layer.wq);
-            MatMul (s.k, s.xb, layer.wk);
-            MatMul (s.v, s.xb, layer.wv);
+            math.MatMul (s.q, s.xb, layer.wq);
+            math.MatMul (s.k, s.xb, layer.wk);
+            math.MatMul (s.v, s.xb, layer.wv);
 
             // RoPE positional encoding
             for (int i = 0; i < s.q.Length; i += 2) {
@@ -149,7 +73,7 @@ static class ForwardPass
                 }
 
                 // Softmax the attention scores
-                Softmax (att, pos + 1);
+                math.Softmax (att, pos + 1);
 
                 // Zero out s.xb for this head
                 Array.Fill (s.xb, 0, q_offset, head_size);
@@ -165,7 +89,7 @@ static class ForwardPass
             }
 
             // Final matmul
-            MatMul (s.xb2, s.xb, layer.wo);
+            math.MatMul (s.xb2, s.xb, layer.wo);
 
             // Residual connection
             for (int i = 0; i < p.dim; i++) {
@@ -173,11 +97,11 @@ static class ForwardPass
             }
 
             // FFN rmsnorm
-            RmsNorm (s.xb, s.x, layer.rms_ffn_weight);
+            math.RmsNorm (s.xb, s.x, layer.rms_ffn_weight);
 
             // FFN computation
-            MatMul (s.hb, s.xb, layer.w1);
-            MatMul (s.hb2, s.xb, layer.w3);
+            math.MatMul (s.hb, s.xb, layer.w1);
+            math.MatMul (s.hb2, s.xb, layer.w3);
 
             // SwiGLU activation
             for (int i = 0; i < p.hidden_dim; i++) {
@@ -188,7 +112,7 @@ static class ForwardPass
             }
 
             // Final FFN matmul
-            MatMul (s.xb, s.hb, layer.w2);
+            math.MatMul (s.xb, s.hb, layer.w2);
 
             // Residual connection
             for (int i = 0; i < p.dim; i++) {
@@ -197,10 +121,10 @@ static class ForwardPass
         }
 
         // Final rmsnorm
-        RmsNorm (s.x, s.x, w.rms_final_weight);
+        math.RmsNorm (s.x, s.x, w.rms_final_weight);
 
         // Classifier into logits
-        MatMul (s.logits, s.x, w.wcls);
+        math.MatMul (s.logits, s.x, w.wcls);
 
         return s.logits;
     }
