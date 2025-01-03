@@ -1,6 +1,6 @@
 ﻿var HOME = Environment.GetFolderPath (Environment.SpecialFolder.UserProfile);
 
-var command = "llama.c:stories-260k";
+var command = "llama.cs:stories-260k";
 
 Console.WriteLine ($"Running {command}");
 

@@ -4,7 +4,6 @@ static class RunState
 {
     public static run_state createRunState (config p) {
         int head_size = p.dim / p.n_heads;
-        int kv_head_size = head_size; // Assuming kv_head_size == head_size
 
         var kv_cache = Enumerable
             .Range (0, p.n_layers)
@@ -20,8 +19,8 @@ static class RunState
             hb = new float[p.hidden_dim],
             hb2 = new float[p.hidden_dim],
             q = new float[p.n_heads, head_size],
-            k = new float[p.n_kv_heads, kv_head_size],
-            v = new float[p.n_kv_heads, kv_head_size],
+            k = new float[p.n_heads, head_size],
+            v = new float[p.n_heads, head_size],
             logits = new float[p.vocab_size],
             kv_cache = kv_cache,
         };
