@@ -3,13 +3,6 @@ using llama.torchsharp;
 
 namespace llama.c;
 
-public class Transformer
-{
-    public config config; // Hyperparameters
-    public weights weights; // Model weights
-    public run_state state; // Run state buffers
-}
-
 static class TransformerModel
 {
     static void MemoryMapWeights (weights w, config p, float[] data, int shared_weights) {
@@ -116,41 +109,40 @@ static class TransformerModel
         }
     }
 
-    static void ReadCheckpoint (string checkpoint, config config, weights weights) {
-        using var fs = new FileStream (checkpoint, FileMode.Open, FileAccess.Read);
-        using var br = new BinaryReader (fs);
-
-        // Read config
-        config.dim = br.ReadInt32 ();
-        config.hidden_dim = br.ReadInt32 ();
-        config.n_layers = br.ReadInt32 ();
-        config.n_heads = br.ReadInt32 ();
-        config.n_kv_heads = br.ReadInt32 ();
-        config.vocab_size = br.ReadInt32 ();
-        config.seq_len = br.ReadInt32 ();
-
-        var shared_weights = config.vocab_size > 0 ? 1 : 0;
-        config.vocab_size = Math.Abs (config.vocab_size);
-
-        var file_size = fs.Length;
-
-        // Read data
-        var dataSize = (int)((file_size - 7 * sizeof(int)) / sizeof(float)); // 7 ints in Config
-        var data = new float[dataSize];
-        for (var i = 0; i < dataSize; i++) {
-            data[i] = br.ReadSingle ();
-        }
-
-        // Map weights
-        MemoryMapWeights (weights, config, data, shared_weights);
-    }
-
-    public static void BuildTransformer (Transformer t, string checkpoint_path) {
+    public static void BuildTransformer (model t, string checkpoint_path) {
         t.config = new config ();
         t.weights = new weights ();
         t.state = new run_state ();
 
-        ReadCheckpoint (checkpoint_path, t.config, t.weights);
+        using (var fs = new FileStream (checkpoint_path, FileMode.Open, FileAccess.Read))
+        {
+            using var br = new BinaryReader (fs);
+
+            // Read config
+            t.config.dim = br.ReadInt32 ();
+            t.config.hidden_dim = br.ReadInt32 ();
+            t.config.n_layers = br.ReadInt32 ();
+            t.config.n_heads = br.ReadInt32 ();
+            t.config.n_kv_heads = br.ReadInt32 ();
+            t.config.vocab_size = br.ReadInt32 ();
+            t.config.seq_len = br.ReadInt32 ();
+
+            var shared_weights = t.config.vocab_size > 0 ? 1 : 0;
+            t.config.vocab_size = Math.Abs (t.config.vocab_size);
+
+            var file_size = fs.Length;
+
+            // Read data
+            var dataSize = (int)((file_size - 7 * sizeof(int)) / sizeof(float)); // 7 ints in Config
+            var data = new float[dataSize];
+            for (var i = 0; i < dataSize; i++) {
+                data[i] = br.ReadSingle ();
+            }
+
+            // Map weights
+            MemoryMapWeights (t.weights, t.config, data, shared_weights);
+        }
+
         t.state.x = new float[t.config.dim];
         t.state.xb = new float[t.config.dim];
         t.state.xb2 = new float[t.config.dim];
@@ -169,7 +161,7 @@ static class TransformerModel
             }).ToArray ();
     }
 
-    public static float[] Forward (Transformer transformer, int token, int pos) {
+    public static float[] Forward (model transformer, int token, int pos) {
         var p = transformer.config;
         var w = transformer.weights;
         var s = transformer.state;
@@ -295,7 +287,7 @@ static class TransformerModel
 
 public class Generator
 {
-    public static void Generate (Transformer transformer, ITokenizer tokenizer, Sampler sampler, string prompt, int steps) {
+    public static void Generate (model transformer, ITokenizer tokenizer, Sampler sampler, string prompt, int steps) {
         if (prompt == null) {
             prompt = "";
         }
@@ -336,21 +328,6 @@ public class Generator
 
 class Program
 {
-    static void ErrorUsage () {
-        Console.WriteLine ("Usage:   run <checkpoint> [options]");
-        Console.WriteLine ("Example: run model.bin -n 256 -i \"Once upon a time\"");
-        Console.WriteLine ("Options:");
-        Console.WriteLine ("  -t <float>  temperature in [0,inf], default 1.0");
-        Console.WriteLine ("  -p <float>  p value in top-p (nucleus) sampling in [0,1] default 0.9");
-        Console.WriteLine ("  -s <int>    random seed, default time(NULL)");
-        Console.WriteLine ("  -n <int>    number of steps to run for, default 256. 0 = max_seq_len");
-        Console.WriteLine ("  -i <string> input prompt");
-        Console.WriteLine ("  -z <string> optional path to custom tokenizer");
-        Console.WriteLine ("  -m <string> mode: generate|chat, default: generate");
-        Console.WriteLine ("  -y <string> (optional) system prompt in chat mode");
-        Environment.Exit (1);
-    }
-
     public static void main (params string[] args) {
         // Default parameters
         string checkpoint_path = null;
@@ -363,18 +340,9 @@ class Program
         var mode = "generate";
         string system_prompt = null;
 
-        if (args.Length >= 1) {
-            checkpoint_path = args[0];
-        } else {
-            ErrorUsage ();
-        }
-
+        checkpoint_path = args[0];
         // Argument parsing
         for (var i = 1; i < args.Length; i += 2) {
-            if (i + 1 >= args.Length) ErrorUsage ();
-            if (args[i][0] != '-') ErrorUsage ();
-            if (args[i].Length != 2) ErrorUsage ();
-
             switch (args[i][1]) {
                 case 't':
                     temperature = float.Parse (args[i + 1]);
@@ -400,9 +368,6 @@ class Program
                 case 'y':
                     system_prompt = args[i + 1];
                     break;
-                default:
-                    ErrorUsage ();
-                    break;
             }
         }
 
@@ -412,7 +377,7 @@ class Program
         if (steps < 0) steps = 0;
 
         // Build the Transformer via the model .bin file
-        var transformer = new Transformer ();
+        var transformer = new model ();
         TransformerModel.BuildTransformer (transformer, checkpoint_path);
         if (steps == 0 || steps > transformer.config.seq_len) {
             steps = transformer.config.seq_len;
@@ -429,7 +394,6 @@ class Program
             Generator.Generate (transformer, tokenizer, sampler, prompt, steps);
         } else {
             Console.Error.WriteLine ($"Unknown mode: {mode}");
-            ErrorUsage ();
         }
     }
 }
