@@ -3,51 +3,6 @@ using llama.torchsharp;
 
 namespace llama.c;
 
-public class TransformerWeights
-{
-    // Token embedding table
-    public float[] token_embedding_table; // (vocab_size * dim)
-
-    // Weights for RMSNorms
-    public float[] rms_att_weight; // (n_layers * dim)
-    public float[] rms_ffn_weight; // (n_layers * dim)
-
-    // Weights for matmuls. note dim == n_heads * head_size
-    public float[] wq; // (n_layers * dim * n_heads * head_size)
-    public float[] wk; // (n_layers * dim * n_kv_heads * head_size)
-    public float[] wv; // (n_layers * dim * n_kv_heads * head_size)
-    public float[] wo; // (n_layers * n_heads * head_size * dim)
-
-    // Weights for FFN
-    public float[] w1; // (n_layers * hidden_dim * dim)
-    public float[] w2; // (n_layers * dim * hidden_dim)
-    public float[] w3; // (n_layers * hidden_dim * dim)
-
-    // Final RMSNorm
-    public float[] rms_final_weight; // (dim)
-
-    // Classifier weights for the logits
-    public float[] wcls;
-}
-
-public class RunState
-{
-    // Current wave of activations
-    public float[] x; // (dim)
-    public float[] xb; // (dim)
-    public float[] xb2; // (dim)
-    public float[] hb; // (hidden_dim)
-    public float[] hb2; // (hidden_dim)
-    public float[] q; // (dim)
-    public float[] k; // (dim)
-    public float[] v; // (dim)
-    public float[] logits; // Output logits
-
-    // KV cache
-    public float[] key_cache; // (n_layers * seq_len * kv_dim)
-    public float[] value_cache; // (n_layers * seq_len * kv_dim)
-}
-
 public class Transformer
 {
     public config config; // Hyperparameters
@@ -57,21 +12,6 @@ public class Transformer
 
 static class TransformerModel
 {
-    static void MallocRunState (RunState s, config p) {
-        var kv_dim = (p.dim * p.n_kv_heads) / p.n_heads;
-        s.x = new float[p.dim];
-        s.xb = new float[p.dim];
-        s.xb2 = new float[p.dim];
-        s.hb = new float[p.hidden_dim];
-        s.hb2 = new float[p.hidden_dim];
-        s.q = new float[p.dim];
-        s.k = new float[p.dim];
-        s.v = new float[p.dim];
-        s.logits = new float[p.vocab_size];
-        s.key_cache = new float[p.n_layers * p.seq_len * kv_dim];
-        s.value_cache = new float[p.n_layers * p.seq_len * kv_dim];
-    }
-
     static void MemoryMapWeights (TransformerWeights w, config p, float[] data, int shared_weights) {
         var head_size = p.dim / p.n_heads;
         long n_layers = p.n_layers;
@@ -81,9 +21,12 @@ static class TransformerModel
         Array.Copy (data, index, w.token_embedding_table, 0, w.token_embedding_table.Length);
         index += w.token_embedding_table.Length;
 
-        w.rms_att_weight = new float[n_layers * p.dim];
-        Array.Copy (data, index, w.rms_att_weight, 0, w.rms_att_weight.Length);
-        index += w.rms_att_weight.Length;
+        w.rms_att_weight = new float[n_layers][];
+        for (var l = 0; l < n_layers; l++) {
+            w.rms_att_weight[l] = new float[p.dim];
+            Array.Copy (data, index, w.rms_att_weight[l], 0, p.dim);
+            index += p.dim;
+        }
 
         w.wq = new float[n_layers * p.dim * p.n_heads * head_size];
         Array.Copy (data, index, w.wq, 0, w.wq.Length);
@@ -101,9 +44,12 @@ static class TransformerModel
         Array.Copy (data, index, w.wo, 0, w.wo.Length);
         index += w.wo.Length;
 
-        w.rms_ffn_weight = new float[n_layers * p.dim];
-        Array.Copy (data, index, w.rms_ffn_weight, 0, w.rms_ffn_weight.Length);
-        index += w.rms_ffn_weight.Length;
+        w.rms_ffn_weight = new float[n_layers][];
+        for (var l = 0; l < n_layers; l++) {
+            w.rms_ffn_weight[l] = new float[p.dim];
+            Array.Copy (data, index, w.rms_ffn_weight[l], 0, p.dim);
+            index += p.dim;
+        }
 
         w.w1 = new float[n_layers * p.hidden_dim * p.dim];
         Array.Copy (data, index, w.w1, 0, w.w1.Length);
@@ -134,7 +80,7 @@ static class TransformerModel
         }
     }
 
-    static void ReadCheckpoint (string checkpoint, config config, TransformerWeights weights, out float[] data, out long file_size) {
+    static void ReadCheckpoint (string checkpoint, config config, TransformerWeights weights) {
         using var fs = new FileStream (checkpoint, FileMode.Open, FileAccess.Read);
         using var br = new BinaryReader (fs);
 
@@ -150,11 +96,11 @@ static class TransformerModel
         var shared_weights = config.vocab_size > 0 ? 1 : 0;
         config.vocab_size = Math.Abs (config.vocab_size);
 
-        file_size = fs.Length;
+        var file_size = fs.Length;
 
         // Read data
         var dataSize = (int)((file_size - 7 * sizeof(int)) / sizeof(float)); // 7 ints in Config
-        data = new float[dataSize];
+        var data = new float[dataSize];
         for (var i = 0; i < dataSize; i++) {
             data[i] = br.ReadSingle ();
         }
@@ -168,47 +114,19 @@ static class TransformerModel
         t.weights = new TransformerWeights ();
         t.state = new RunState ();
 
-        ReadCheckpoint (checkpoint_path, t.config, t.weights, out _, out _);
-        MallocRunState (t.state, t.config);
-    }
-
-    static void RmsNorm (float[] o, float[] x, float[] weight, int weightOffset, int size) {
-        // Calculate sum of squares
-        var ss = 0.0f;
-        for (var j = 0; j < size; j++) {
-            ss += x[j] * x[j];
-        }
-
-        ss /= size;
-        ss += 1e-5f;
-        ss = 1.0f / MathF.Sqrt (ss);
-
-        // Normalize and scale
-        for (var j = 0; j < size; j++) {
-            o[j] = weight[weightOffset + j] * (ss * x[j]);
-        }
-    }
-
-    public static void Softmax (float[] x, int size) {
-        // Find max value
-        var max_val = x[0];
-        for (var i = 1; i < size; i++) {
-            if (x[i] > max_val) {
-                max_val = x[i];
-            }
-        }
-
-        // Exponentiate and sum
-        var sum = 0.0f;
-        for (var i = 0; i < size; i++) {
-            x[i] = MathF.Exp (x[i] - max_val);
-            sum += x[i];
-        }
-
-        // Normalize
-        for (var i = 0; i < size; i++) {
-            x[i] /= sum;
-        }
+        ReadCheckpoint (checkpoint_path, t.config, t.weights);
+        var kv_dim = (t.config.dim * t.config.n_kv_heads) / t.config.n_heads;
+        t.state.x = new float[t.config.dim];
+        t.state.xb = new float[t.config.dim];
+        t.state.xb2 = new float[t.config.dim];
+        t.state.hb = new float[t.config.hidden_dim];
+        t.state.hb2 = new float[t.config.hidden_dim];
+        t.state.q = new float[t.config.dim];
+        t.state.k = new float[t.config.dim];
+        t.state.v = new float[t.config.dim];
+        t.state.logits = new float[t.config.vocab_size];
+        t.state.key_cache = new float[t.config.n_layers * t.config.seq_len * kv_dim];
+        t.state.value_cache = new float[t.config.n_layers * t.config.seq_len * kv_dim];
     }
 
     static void MatMul (float[] xout, float[] x, float[] w, int wOffset, int n, int d) {
@@ -243,7 +161,7 @@ static class TransformerModel
         // Forward pass through layers
         for (var l = 0; l < p.n_layers; l++) {
             // Attention rmsnorm
-            RmsNorm (s.xb, x, w.rms_att_weight, l * dim, dim);
+            math.RmsNorm (s.xb, x, w.rms_att_weight[l]);
 
             // Key and value cache offsets
             var loff = l * p.seq_len * kv_dim;
@@ -303,7 +221,8 @@ static class TransformerModel
                 }
 
                 // Softmax the attention scores
-                Softmax (att, pos + 1);
+                int size = pos + 1;
+                math.Softmax (att, size);
 
                 // Zero out s.xb for this head
                 Array.Fill (s.xb, 0, headOffset, head_size);
@@ -327,7 +246,7 @@ static class TransformerModel
             }
 
             // FFN rmsnorm
-            RmsNorm (s.xb, x, w.rms_ffn_weight, l * dim, dim);
+            math.RmsNorm (s.xb, x, w.rms_ffn_weight[l]);
 
             // FFN computation
             MatMul (s.hb, s.xb, w.w1, l * p.hidden_dim * dim, dim, p.hidden_dim);
@@ -351,7 +270,7 @@ static class TransformerModel
         }
 
         // Final rmsnorm
-        RmsNorm (x, x, w.rms_final_weight, 0, dim);
+        math.RmsNorm (x, x, w.rms_final_weight);
 
         // Classifier into logits
         MatMul (s.logits, x, w.wcls, 0, p.dim, p.vocab_size);
@@ -431,7 +350,7 @@ class Program
         // Default parameters
         string checkpoint_path = null;
         var tokenizer_path = "resources/tokenizer.bin";
-        var temperature = 1.0f;
+        var temperature = 0.0f;
         var topp = 0.9f;
         var steps = 256;
         string prompt = null;
