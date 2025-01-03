@@ -23,6 +23,13 @@ switch (command) {
             prompt: "Once upon a time");
         break;
 
+    case "llama.c:stories-15m":
+        llama.c.Program.main (
+            $"resources/stories15M.bin",
+            "-z",
+            $"resources/tokenizer.bin");
+        break;
+
     case "llama.cs:stories-15m":
         llama.cs.Entrypoint.main (
             llama.cs.TokenizerType.llama_cs,

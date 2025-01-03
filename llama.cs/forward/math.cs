@@ -110,7 +110,7 @@ public class math
     }
 
     public static unsafe void MatMul (float[,] xout, float[] x, float[,] W) {
-        var size = xout.GetLength (0);
+        var size = xout.GetLength (1);
 
         if (x.Length > 1000) {
             Parallel.For (0, xout.Length, i => {
