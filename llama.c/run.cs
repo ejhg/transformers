@@ -7,7 +7,7 @@ public class Transformer
 {
     public config config; // Hyperparameters
     public TransformerWeights weights; // Model weights
-    public RunState state; // Run state buffers
+    public run_state state; // Run state buffers
 }
 
 static class TransformerModel
@@ -148,7 +148,7 @@ static class TransformerModel
     public static void BuildTransformer (Transformer t, string checkpoint_path) {
         t.config = new config ();
         t.weights = new TransformerWeights ();
-        t.state = new RunState ();
+        t.state = new run_state ();
 
         ReadCheckpoint (checkpoint_path, t.config, t.weights);
         t.state.x = new float[t.config.dim];
@@ -163,7 +163,7 @@ static class TransformerModel
 
         t.state.kv_cache = Enumerable
             .Range (0, t.config.n_layers)
-            .Select (_ => new RunState.LayerCache {
+            .Select (_ => new run_state.LayerCache {
                 key_cache = new float[t.config.seq_len, t.config.n_kv_heads, t.config.dim / t.config.n_heads],
                 value_cache = new float[t.config.seq_len, t.config.n_kv_heads, t.config.dim / t.config.n_heads]
             }).ToArray ();
