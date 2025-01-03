@@ -77,4 +77,23 @@ public class math
             }
         });
     }
+
+    public static unsafe void MatMul (float[,] xout, float[] x, float[,] W) {
+        var size = xout.GetLength (0);
+
+        Parallel.For (0, xout.Length, i => {
+            int n = x.Length;
+
+            fixed (float* pW = W) {
+                float val = 0.0f;
+                float* pRowW = pW + i * n;
+
+                for (int j = 0; j < n; j++) {
+                    val += pRowW[j] * x[j];
+                }
+
+                xout[i / size, i % size] = val;
+            }
+        });
+    }
 }
