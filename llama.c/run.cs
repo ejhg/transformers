@@ -120,9 +120,9 @@ static class TransformerModel
         t.state.xb2 = new float[t.config.dim];
         t.state.hb = new float[t.config.hidden_dim];
         t.state.hb2 = new float[t.config.hidden_dim];
-        t.state.q = new float[t.config.dim];
-        t.state.k = new float[t.config.dim];
-        t.state.v = new float[t.config.dim];
+        t.state.q = new float[t.config.n_heads, t.config.dim / t.config.n_heads];
+        t.state.k = new float[t.config.n_heads, t.config.dim / t.config.n_heads];
+        t.state.v = new float[t.config.n_heads, t.config.dim / t.config.n_heads];
         t.state.logits = new float[t.config.vocab_size];
 
         t.state.kv_cache = Enumerable
@@ -161,6 +161,21 @@ static class TransformerModel
         }
     }
 
+    static void MatMul (float[,] xout, float[] x, float[] w, int wOffset, int n, int d) {
+        var size = xout.GetLength (0);
+
+        for (var i = 0; i < d; i++) {
+            var val = 0.0f;
+            var ptr = wOffset + i * n;
+
+            for (var j = 0; j < n; j++) {
+                val += w[ptr + j] * x[j];
+            }
+
+            xout[i / size, i % size] = val;
+        }
+    }
+
     public static float[] Forward (Transformer transformer, int token, int pos) {
         // Convenience variables
         var p = transformer.config;
@@ -196,27 +211,23 @@ static class TransformerModel
                     var dst = v == 0
                         ? s.q
                         : s.k;
-                    var v0 = dst[i];
-                    var v1 = dst[i + 1];
-                    dst[i] = v0 * fcr - v1 * fci;
-                    dst[i + 1] = v0 * fci + v1 * fcr;
+                    var v0 = dst[i / head_size, i % head_size];
+                    var v1 = dst[(i + 1) / head_size, (i + 1) % head_size];
+                    dst[i / head_size, i % head_size] = v0 * fcr - v1 * fci;
+                    dst[(i + 1) / head_size, (i + 1) % head_size] = v0 * fci + v1 * fcr;
                 }
             }
 
             // Store k and v in cache
             for (var j = 0; j < head_size; j++) {
                 for (var h = 0; h < p.n_kv_heads; h++) {
-                    s.kv_cache[l].key_cache[pos, h, j] = s.k[h * head_size + j];
-                    s.kv_cache[l].value_cache[pos, h, j] = s.v[h * head_size + j];
+                    s.kv_cache[l].key_cache[pos, h, j] = s.k[h, j];
+                    s.kv_cache[l].value_cache[pos, h, j] = s.v[h, j];
                 }
             }
 
             // Multihead attention
             for (var h = 0; h < p.n_heads; h++) {
-                var headOffset = h * (dim / p.n_heads);
-
-                // Indices for q
-
                 // Initialize attention scores
                 var att = new float[pos + 1];
 
@@ -225,7 +236,7 @@ static class TransformerModel
                     // Dot product between q and k
                     var score = 0.0f;
                     for (var i = 0; i < dim / p.n_heads; i++) {
-                        score += s.q[headOffset + i] * s.kv_cache[l].key_cache[t, h * p.n_kv_heads / p.n_heads, i];
+                        score += s.q[h, i] * s.kv_cache[l].key_cache[t, h * p.n_kv_heads / p.n_heads, i];
                     }
 
                     score /= MathF.Sqrt (dim / p.n_heads);
@@ -237,12 +248,12 @@ static class TransformerModel
                 math.Softmax (att, size);
 
                 // Zero out s.xb for this head
-                Array.Fill (s.xb, 0, headOffset, dim / p.n_heads);
+                Array.Fill (s.xb, 0, h * (dim / p.n_heads), dim / p.n_heads);
 
                 for (var t = 0; t <= pos; t++) {
                     var a = att[t];
                     for (var i = 0; i < dim / p.n_heads; i++) {
-                        s.xb[headOffset + i] += a * s.kv_cache[l].value_cache[t, h * p.n_kv_heads / p.n_heads, i];
+                        s.xb[h * (dim / p.n_heads) + i] += a * s.kv_cache[l].value_cache[t, h * p.n_kv_heads / p.n_heads, i];
                     }
                 }
             }
