@@ -18,7 +18,8 @@ public class RunState
 
     public struct LayerCache
     {
-        public float[] key_cache; // [seq_len][n_kv_heads * head_size]
-        public float[] value_cache; // [seq_len][n_kv_heads * head_size]
+        // seq_len * dim * n_kv_heads / n_heads
+        public float[,] key_cache; // [seq_len][n_kv_heads][head_size]
+        public float[,] value_cache; // [seq_len][n_kv_heads][head_size]
     }
 }
