@@ -14,6 +14,11 @@ public class RunState
     public float[] logits; // Output logits
 
     // KV cache
-    public float[] key_cache; // (n_layers * seq_len * kv_dim)
-    public float[] value_cache; // (n_layers * seq_len * kv_dim)
+    public LayerCache[] kv_cache;
+
+    public struct LayerCache
+    {
+        public float[] key_cache; // [seq_len][n_kv_heads * head_size]
+        public float[] value_cache; // [seq_len][n_kv_heads * head_size]
+    }
 }

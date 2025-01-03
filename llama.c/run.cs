@@ -125,8 +125,12 @@ static class TransformerModel
         t.state.k = new float[t.config.dim];
         t.state.v = new float[t.config.dim];
         t.state.logits = new float[t.config.vocab_size];
-        t.state.key_cache = new float[t.config.n_layers * t.config.seq_len * kv_dim];
-        t.state.value_cache = new float[t.config.n_layers * t.config.seq_len * kv_dim];
+        t.state.kv_cache = Enumerable
+            .Range (0, t.config.n_layers)
+            .Select (_ => new RunState.LayerCache {
+                key_cache = new float[t.config.seq_len * kv_dim],
+                value_cache = new float[t.config.seq_len * kv_dim]
+            }).ToArray ();
     }
 
     static void MatMul (float[] xout, float[] x, float[] w, int wOffset, int n, int d) {
@@ -163,11 +167,6 @@ static class TransformerModel
             // Attention rmsnorm
             math.RmsNorm (s.xb, x, w.rms_att_weight[l]);
 
-            // Key and value cache offsets
-            var loff = l * p.seq_len * kv_dim;
-            var kOffset = loff + pos * kv_dim;
-            var vOffset = loff + pos * kv_dim;
-
             // Compute q, k, v
             MatMul (s.q, s.xb, w.wq, l * dim * p.n_heads * head_size, dim, p.n_heads * head_size);
             MatMul (s.k, s.xb, w.wk, l * dim * p.n_kv_heads * head_size, dim, p.n_kv_heads * head_size);
@@ -193,8 +192,8 @@ static class TransformerModel
             }
 
             // Store k and v in cache
-            Array.Copy (s.k, 0, s.key_cache, kOffset, kv_dim);
-            Array.Copy (s.v, 0, s.value_cache, vOffset, kv_dim);
+            Array.Copy (s.k, 0, s.kv_cache[l].key_cache, pos * kv_dim, kv_dim);
+            Array.Copy (s.v, 0, s.kv_cache[l].value_cache, pos * kv_dim, kv_dim);
 
             // Multihead attention
             for (var h = 0; h < p.n_heads; h++) {
@@ -208,12 +207,12 @@ static class TransformerModel
 
                 // Iterate over all timesteps
                 for (var t = 0; t <= pos; t++) {
-                    var kHeadOffset = loff + t * kv_dim + (h / kv_mul) * head_size;
+                    var kHeadOffset = t * kv_dim + (h / kv_mul) * head_size;
 
                     // Dot product between q and k
                     var score = 0.0f;
                     for (var i = 0; i < head_size; i++) {
-                        score += s.q[qStart + i] * s.key_cache[kHeadOffset + i];
+                        score += s.q[qStart + i] * s.kv_cache[l].key_cache[kHeadOffset + i];
                     }
 
                     score /= MathF.Sqrt (head_size);
@@ -228,11 +227,11 @@ static class TransformerModel
                 Array.Fill (s.xb, 0, headOffset, head_size);
 
                 for (var t = 0; t <= pos; t++) {
-                    var vHeadOffset = loff + t * kv_dim + (h / kv_mul) * head_size;
+                    var vHeadOffset = t * kv_dim + (h / kv_mul) * head_size;
 
                     var a = att[t];
                     for (var i = 0; i < head_size; i++) {
-                        s.xb[headOffset + i] += a * s.value_cache[vHeadOffset + i];
+                        s.xb[headOffset + i] += a * s.kv_cache[l].value_cache[vHeadOffset + i];
                     }
                 }
             }
