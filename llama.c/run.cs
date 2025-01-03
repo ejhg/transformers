@@ -125,28 +125,40 @@ static class TransformerModel
         t.state.v = new float[t.config.dim];
         t.state.logits = new float[t.config.vocab_size];
 
-        var kv_dim = (t.config.dim * t.config.n_kv_heads) / t.config.n_heads;
         t.state.kv_cache = Enumerable
             .Range (0, t.config.n_layers)
             .Select (_ => new RunState.LayerCache {
-                key_cache = new float[t.config.seq_len, kv_dim],
-                value_cache = new float[t.config.seq_len, kv_dim]
+                key_cache = new float[t.config.seq_len, t.config.n_kv_heads, t.config.dim / t.config.n_heads],
+                value_cache = new float[t.config.seq_len, t.config.n_kv_heads, t.config.dim / t.config.n_heads]
             }).ToArray ();
     }
 
     static void MatMul (float[] xout, float[] x, float[] w, int wOffset, int n, int d) {
         // W (d,n) @ x (n,) -> xout (d,)
 
-        Parallel.For (0, d, i => {
-            var val = 0.0f;
-            var ptr = wOffset + i * n;
+        if (x.Length > 1000) {
+            Parallel.For (0, d, i => {
+                var val = 0.0f;
+                var ptr = wOffset + i * n;
 
-            for (var j = 0; j < n; j++) {
-                val += w[ptr + j] * x[j];
+                for (var j = 0; j < n; j++) {
+                    val += w[ptr + j] * x[j];
+                }
+
+                xout[i] = val;
+            });
+        } else {
+            for (var i = 0; i < d; i++) {
+                var val = 0.0f;
+                var ptr = wOffset + i * n;
+
+                for (var j = 0; j < n; j++) {
+                    val += w[ptr + j] * x[j];
+                }
+
+                xout[i] = val;
             }
-
-            xout[i] = val;
-        });
+        }
     }
 
     public static float[] Forward (Transformer transformer, int token, int pos) {
@@ -156,7 +168,8 @@ static class TransformerModel
         var s = transformer.state;
         var x = s.x;
         var dim = p.dim;
-        var kv_dim = (p.dim * p.n_kv_heads) / p.n_heads;
+        var head_size = p.dim / p.n_heads;
+        var kv_dim = head_size * p.n_kv_heads;
 
         // Copy token embedding into x
         Array.Copy (w.token_embedding_table, token * dim, x, 0, dim);
@@ -191,12 +204,11 @@ static class TransformerModel
             }
 
             // Store k and v in cache
-            for (var i = 0; i < kv_dim; i++) {
-                s.kv_cache[l].key_cache[pos, i] = s.k[i];
-            }
-
-            for (var i = 0; i < kv_dim; i++) {
-                s.kv_cache[l].value_cache[pos, i] = s.v[i];
+            for (var j = 0; j < head_size; j++) {
+                for (var h = 0; h < p.n_kv_heads; h++) {
+                    s.kv_cache[l].key_cache[pos, h, j] = s.k[h * head_size + j];
+                    s.kv_cache[l].value_cache[pos, h, j] = s.v[h * head_size + j];
+                }
             }
 
             // Multihead attention
@@ -213,7 +225,7 @@ static class TransformerModel
                     // Dot product between q and k
                     var score = 0.0f;
                     for (var i = 0; i < dim / p.n_heads; i++) {
-                        score += s.q[headOffset + i] * s.kv_cache[l].key_cache[t, (h * p.n_kv_heads / (p.n_heads)) * dim / p.n_heads + i];
+                        score += s.q[headOffset + i] * s.kv_cache[l].key_cache[t, h * p.n_kv_heads / p.n_heads, i];
                     }
 
                     score /= MathF.Sqrt (dim / p.n_heads);
@@ -230,13 +242,13 @@ static class TransformerModel
                 for (var t = 0; t <= pos; t++) {
                     var a = att[t];
                     for (var i = 0; i < dim / p.n_heads; i++) {
-                        s.xb[headOffset + i] += a * s.kv_cache[l].value_cache[t, (h * p.n_kv_heads / (p.n_heads)) * (dim / p.n_heads) + i];
+                        s.xb[headOffset + i] += a * s.kv_cache[l].value_cache[t, h * p.n_kv_heads / p.n_heads, i];
                     }
                 }
             }
 
             // Final matmul
-            MatMul (s.xb2, s.xb, w.wo, l * p.n_heads * dim / p.n_heads * dim, p.n_heads * dim / p.n_heads, dim);
+            MatMul (s.xb2, s.xb, w.wo, l * dim * dim, dim, dim);
 
             // Residual connection
             for (var i = 0; i < dim; i++) {
@@ -303,7 +315,7 @@ public class Generator
 
             if (next == 1) break;
 
-            Console.WriteLine(tokenizer.Decode (tokens));
+            Console.WriteLine (tokenizer.Decode (tokens));
 
             if (start == 0) start = DateTimeOffset.Now.ToUnixTimeMilliseconds ();
         }
