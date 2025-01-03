@@ -157,8 +157,6 @@ static class TransformerModel
         var x = s.x;
         var dim = p.dim;
         var kv_dim = (p.dim * p.n_kv_heads) / p.n_heads;
-        var kv_mul = p.n_heads / p.n_kv_heads;
-        var head_size = dim / p.n_heads;
 
         // Copy token embedding into x
         Array.Copy (w.token_embedding_table, token * dim, x, 0, dim);
@@ -169,18 +167,18 @@ static class TransformerModel
             math.RmsNorm (s.xb, x, w.rms_att_weight[l]);
 
             // Compute q, k, v
-            MatMul (s.q, s.xb, w.wq, l * dim * p.n_heads * head_size, dim, p.n_heads * head_size);
-            MatMul (s.k, s.xb, w.wk, l * dim * p.n_kv_heads * head_size, dim, p.n_kv_heads * head_size);
-            MatMul (s.v, s.xb, w.wv, l * dim * p.n_kv_heads * head_size, dim, p.n_kv_heads * head_size);
+            MatMul (s.q, s.xb, w.wq, l * dim * dim, dim, dim);
+            MatMul (s.k, s.xb, w.wk, l * dim * kv_dim, dim, kv_dim);
+            MatMul (s.v, s.xb, w.wv, l * dim * kv_dim, dim, kv_dim);
 
             // RoPE positional encoding
-            for (var i = 0; i < p.n_heads * head_size; i += 2) {
-                var head_dim = i % head_size;
-                var freq = 1.0f / MathF.Pow (10000.0f, head_dim / (float)head_size);
+            for (var i = 0; i < dim; i += 2) {
+                var head_dim = i % (dim / p.n_heads);
+                var freq = 1.0f / MathF.Pow (10000.0f, head_dim / (float)(dim / p.n_heads));
                 var val = pos * freq;
                 var fcr = MathF.Cos (val);
                 var fci = MathF.Sin (val);
-                var rotn = i < p.n_kv_heads * head_size ? 2 : 1; // Rotate q and k
+                var rotn = i < kv_dim ? 2 : 1; // Rotate q and k
                 for (var v = 0; v < rotn; v++) {
                     var dst = v == 0
                         ? s.q
@@ -203,7 +201,7 @@ static class TransformerModel
 
             // Multihead attention
             for (var h = 0; h < p.n_heads; h++) {
-                var headOffset = h * head_size;
+                var headOffset = h * (dim / p.n_heads);
 
                 // Indices for q
 
@@ -214,11 +212,11 @@ static class TransformerModel
                 for (var t = 0; t <= pos; t++) {
                     // Dot product between q and k
                     var score = 0.0f;
-                    for (var i = 0; i < head_size; i++) {
-                        score += s.q[headOffset + i] * s.kv_cache[l].key_cache[t, (h / kv_mul) * head_size + i];
+                    for (var i = 0; i < dim / p.n_heads; i++) {
+                        score += s.q[headOffset + i] * s.kv_cache[l].key_cache[t, (h * p.n_kv_heads / (p.n_heads)) * dim / p.n_heads + i];
                     }
 
-                    score /= MathF.Sqrt (head_size);
+                    score /= MathF.Sqrt (dim / p.n_heads);
                     att[t] = score;
                 }
 
@@ -227,18 +225,18 @@ static class TransformerModel
                 math.Softmax (att, size);
 
                 // Zero out s.xb for this head
-                Array.Fill (s.xb, 0, headOffset, head_size);
+                Array.Fill (s.xb, 0, headOffset, dim / p.n_heads);
 
                 for (var t = 0; t <= pos; t++) {
                     var a = att[t];
-                    for (var i = 0; i < head_size; i++) {
-                        s.xb[headOffset + i] += a * s.kv_cache[l].value_cache[t, (h / kv_mul) * head_size + i];
+                    for (var i = 0; i < dim / p.n_heads; i++) {
+                        s.xb[headOffset + i] += a * s.kv_cache[l].value_cache[t, (h * p.n_kv_heads / (p.n_heads)) * (dim / p.n_heads) + i];
                     }
                 }
             }
 
             // Final matmul
-            MatMul (s.xb2, s.xb, w.wo, l * p.n_heads * head_size * dim, p.n_heads * head_size, dim);
+            MatMul (s.xb2, s.xb, w.wo, l * p.n_heads * dim / p.n_heads * dim, p.n_heads * dim / p.n_heads, dim);
 
             // Residual connection
             for (var i = 0; i < dim; i++) {
@@ -275,16 +273,6 @@ static class TransformerModel
         // Classifier into logits
         MatMul (s.logits, x, w.wcls, 0, p.dim, p.vocab_size);
         return s.logits;
-    }
-}
-
-public class TokenIndex : IComparable<TokenIndex>
-{
-    public string str;
-    public int id;
-
-    public int CompareTo (TokenIndex other) {
-        return string.Compare (str, other.str, StringComparison.Ordinal);
     }
 }
 
