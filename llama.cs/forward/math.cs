@@ -45,55 +45,103 @@ public class math
      * W (m,n) @ x (n,) -> xout (m,)
      */
     public static void MatMul (float[] xout, float[] x, float[][] W) {
-        Parallel.For (0, xout.Length, i => {
-            float val = 0.0f;
-            int n = x.Length;
-            var row = W[i];
+        if (x.Length > 1000) {
+            Parallel.For (0, xout.Length, i => {
+                float val = 0.0f;
+                int n = x.Length;
+                var row = W[i];
 
-            for (int j = 0; j < n; j++) {
-                val += row[j] * x[j];
+                for (int j = 0; j < n; j++) {
+                    val += row[j] * x[j];
+                }
+
+                xout[i] = val;
+            });
+        } else {
+            for (var i = 0; i < xout.Length; i++) {
+                float val = 0.0f;
+                int n = x.Length;
+                var row = W[i];
+
+                for (int j = 0; j < n; j++) {
+                    val += row[j] * x[j];
+                }
+
+                xout[i] = val;
             }
-
-            xout[i] = val;
-        });
+        }
     }
 
     /**
      * W (m,n) @ x (n,) -> xout (m,)
      */
     public static unsafe void MatMul (float[] xout, float[] x, float[,] W) {
-        Parallel.For (0, xout.Length, i => {
-            int n = x.Length;
+        if (x.Length > 1000) {
+            Parallel.For (0, xout.Length, i => {
+                int n = x.Length;
 
-            fixed (float* pW = W) {
-                float val = 0.0f;
-                float* pRowW = pW + i * n;
+                fixed (float* pW = W) {
+                    float val = 0.0f;
+                    float* pRowW = pW + i * n;
 
-                for (int j = 0; j < n; j++) {
-                    val += pRowW[j] * x[j];
+                    for (int j = 0; j < n; j++) {
+                        val += pRowW[j] * x[j];
+                    }
+
+                    xout[i] = val;
                 }
+            });
+        } else {
+            for (var i = 0; i < xout.Length; i++) {
+                int n = x.Length;
 
-                xout[i] = val;
+                fixed (float* pW = W) {
+                    float val = 0.0f;
+                    float* pRowW = pW + i * n;
+
+                    for (int j = 0; j < n; j++) {
+                        val += pRowW[j] * x[j];
+                    }
+
+                    xout[i] = val;
+                }
             }
-        });
+        }
     }
 
     public static unsafe void MatMul (float[,] xout, float[] x, float[,] W) {
         var size = xout.GetLength (0);
 
-        Parallel.For (0, xout.Length, i => {
-            int n = x.Length;
+        if (x.Length > 1000) {
+            Parallel.For (0, xout.Length, i => {
+                int n = x.Length;
 
-            fixed (float* pW = W) {
-                float val = 0.0f;
-                float* pRowW = pW + i * n;
+                fixed (float* pW = W) {
+                    float val = 0.0f;
+                    float* pRowW = pW + i * n;
 
-                for (int j = 0; j < n; j++) {
-                    val += pRowW[j] * x[j];
+                    for (int j = 0; j < n; j++) {
+                        val += pRowW[j] * x[j];
+                    }
+
+                    xout[i / size, i % size] = val;
                 }
+            });
+        } else {
+            for (var i = 0; i < xout.Length; i++) {
+                int n = x.Length;
 
-                xout[i / size, i % size] = val;
+                fixed (float* pW = W) {
+                    float val = 0.0f;
+                    float* pRowW = pW + i * n;
+
+                    for (int j = 0; j < n; j++) {
+                        val += pRowW[j] * x[j];
+                    }
+
+                    xout[i / size, i % size] = val;
+                }
             }
-        });
+        }
     }
 }
