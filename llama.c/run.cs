@@ -6,13 +6,13 @@ namespace llama.c;
 public class Transformer
 {
     public config config; // Hyperparameters
-    public TransformerWeights weights; // Model weights
+    public weights weights; // Model weights
     public run_state state; // Run state buffers
 }
 
 static class TransformerModel
 {
-    static void MemoryMapWeights (TransformerWeights w, config p, float[] data, int shared_weights) {
+    static void MemoryMapWeights (weights w, config p, float[] data, int shared_weights) {
         var head_size = p.dim / p.n_heads;
         long n_layers = p.n_layers;
         long index = 0;
@@ -26,8 +26,8 @@ static class TransformerModel
             }
         }
 
-        w.layers = new TransformerWeights.LayerWeights[n_layers]
-            .Select (_ => new TransformerWeights.LayerWeights ())
+        w.layers = new weights.LayerWeights[n_layers]
+            .Select (_ => new weights.LayerWeights ())
             .ToArray ();
 
         int l;
@@ -116,7 +116,7 @@ static class TransformerModel
         }
     }
 
-    static void ReadCheckpoint (string checkpoint, config config, TransformerWeights weights) {
+    static void ReadCheckpoint (string checkpoint, config config, weights weights) {
         using var fs = new FileStream (checkpoint, FileMode.Open, FileAccess.Read);
         using var br = new BinaryReader (fs);
 
@@ -147,7 +147,7 @@ static class TransformerModel
 
     public static void BuildTransformer (Transformer t, string checkpoint_path) {
         t.config = new config ();
-        t.weights = new TransformerWeights ();
+        t.weights = new weights ();
         t.state = new run_state ();
 
         ReadCheckpoint (checkpoint_path, t.config, t.weights);
