@@ -5,13 +5,6 @@ var command = "llama.cs:llama-3.2-1b-instruct";
 Console.WriteLine ($"Running {command}");
 
 switch (command) {
-    case "llama.c:stories-260k":
-        llama.c.Program.main (
-            $"{HOME}/llama/stories-260k/stories260K.bin",
-            "-z",
-            $"{HOME}/llama/stories-260k/tok512.bin");
-        break;
-
     case "llama.cs:stories-260k":
         llama.cs.Entrypoint.main (
             llama.cs.TokenizerType.llama_cs,
@@ -21,13 +14,6 @@ switch (command) {
             rng_seed: 1,
             temperature: 0,
             prompt: "Once upon a time");
-        break;
-
-    case "llama.c:stories-15m":
-        llama.c.Program.main (
-            $"resources/stories15M.bin",
-            "-z",
-            $"resources/tokenizer.bin");
         break;
 
     case "llama.cs:stories-15m":
