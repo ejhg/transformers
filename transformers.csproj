@@ -6,14 +6,30 @@
         <Nullable>enable</Nullable>
         <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     </PropertyGroup>
-    <ItemGroup>
-        <Compile Remove="tests\**"/>
-    </ItemGroup>
+
+    <!-- Configuration specific settings -->
+    <PropertyGroup Condition="'$(Configuration)' == 'Test'">
+        <DefineConstants>TEST</DefineConstants>
+    </PropertyGroup>
+
+    <!-- Main project references -->
     <ItemGroup>
         <PackageReference Include="Microsoft.ML.Tokenizers" Version="0.21.1"/>
         <PackageReference Include="Tiktoken" Version="2.0.3"/>
         <PackageReference Include="TorchSharp" Version="0.103.1"/>
         <PackageReference Include="TorchSharp-cpu" Version="0.103.1"/>
         <PackageReference Include="TorchSharp.PyBridge" Version="1.4.3"/>
+    </ItemGroup>
+
+    <!-- Test project references (only included in Test configuration) -->
+    <ItemGroup Condition="'$(Configuration)' == 'Test'">
+        <PackageReference Include="NUnit" Version="3.14.0" />
+        <PackageReference Include="NUnit3TestAdapter" Version="4.6.0"/>
+        <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.5.0"/>
+    </ItemGroup>
+
+    <!-- Conditionally exclude or include test files -->
+    <ItemGroup Condition="'$(Configuration)' != 'Test'">
+        <Compile Remove="tests\**"/>
     </ItemGroup>
 </Project>
