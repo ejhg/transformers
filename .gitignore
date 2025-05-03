@@ -2,4 +2,4 @@
 bin/
 obj/
 tmp/
-Folder.DotSettings.user
+*.DotSettings.user
