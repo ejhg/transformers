@@ -1,5 +1,3 @@
-using System;
-
 public class LowRankSVD
 {
     // Dot product of two vectors

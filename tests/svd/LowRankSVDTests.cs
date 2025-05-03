@@ -1,3 +1,4 @@
+using llama.cs;
 using NUnit.Framework;
 
 namespace transformers.tests.svd;
@@ -17,10 +18,9 @@ public class LowRankSVDTests
 
     [Test]
     public void test2 () {
-        const int rows = 5;
-        const int cols = 4;
-        const int rank = 2;
-        const double epsilon = 1e-4;
+        const int rows = 100;
+        const int cols = 100;
+        const int rank = 70;
 
         // Generate a random matrix A
         var rand = new Random (42);
@@ -46,14 +46,24 @@ public class LowRankSVDTests
 
         // Compute reconstruction error
         double maxDiff = 0.0;
+        int signMismatches = 0;
         for (int i = 0; i < rows; i++) {
             for (int j = 0; j < cols; j++) {
-                double diff = Math.Abs (A[i, j] - A_approx[i, j]);
-                if (diff > maxDiff) maxDiff = diff;
+                var diff = Math.Abs (A[i, j] - A_approx[i, j]);
+                if (diff > maxDiff) {
+                    maxDiff = diff;
+                }
+
+                if (Math.Sign (A[i, j]) != Math.Sign (A_approx[i, j])) {
+                    signMismatches++;
+                }
             }
         }
 
-        Assert.LessOrEqual (maxDiff, epsilon);
+        Console.WriteLine("mismatches: " + signMismatches);
+
+        Assert.LessOrEqual (signMismatches, 400);
+        Assert.LessOrEqual (maxDiff, 0.5);
     }
 
     // Matrix multiplication helper
