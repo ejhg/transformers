@@ -17,12 +17,12 @@ static class ForwardPass
         // Forward pass through layers
         for (var l = 0; l < p.n_layers; l++) {
             var layer = w.layers[l];
-            var _cache = s.kv_cache[l];
 
             // Attention rmsnorm
             math.RmsNorm (s.xb, s.x, layer.rms_att_weight);
 
-            // Compute q, k, v
+            // Compute q, k, v with regular matrix multiplications
+            // We can't use the SVD version here because these are 2D output matrices
             math.MatMul (s.q, s.xb, layer.wq);
             math.MatMul (s.k, s.xb, layer.wk);
             math.MatMul (s.v, s.xb, layer.wv);
@@ -85,8 +85,16 @@ static class ForwardPass
                 }
             }
 
-            // Final matmul
-            math.MatMul (s.xb2, s.xb, layer.wo);
+            // Convert xb to a temporary 1D array for SVD-aware multiplication
+            var xb_temp = new float[p.dim];
+            Array.Copy (s.xb, xb_temp, p.dim);
+
+            // Final matmul with SVD-aware multiplication
+            if (layer.wo_svd != null && layer.wo_svd.use_svd) {
+                math.MatMulSVD (s.xb2, xb_temp, layer.wo_svd);
+            } else {
+                math.MatMul (s.xb2, s.xb, layer.wo);
+            }
 
             // Residual connection
             for (var i = 0; i < dim; i++) {
@@ -96,9 +104,18 @@ static class ForwardPass
             // FFN rmsnorm
             math.RmsNorm (s.xb, s.x, layer.rms_ffn_weight);
 
-            // FFN computation
-            math.MatMul (s.hb, s.xb, layer.w1);
-            math.MatMul (s.hb2, s.xb, layer.w3);
+            // FFN computation with SVD-aware multiplication
+            if (layer.w1_svd != null && layer.w1_svd.use_svd) {
+                math.MatMulSVD (s.hb, xb_temp, layer.w1_svd);
+            } else {
+                math.MatMul (s.hb, s.xb, layer.w1);
+            }
+
+            if (layer.w3_svd != null && layer.w3_svd.use_svd) {
+                math.MatMulSVD (s.hb2, xb_temp, layer.w3_svd);
+            } else {
+                math.MatMul (s.hb2, s.xb, layer.w3);
+            }
 
             // SwiGLU activation
             for (var i = 0; i < p.hidden_dim; i++) {
@@ -108,8 +125,16 @@ static class ForwardPass
                 s.hb[i] = val;
             }
 
-            // Final FFN matmul
-            math.MatMul (s.xb, s.hb, layer.w2);
+            // Convert hb to a temporary 1D array for SVD-aware multiplication
+            var hb_temp = new float[p.hidden_dim];
+            Array.Copy (s.hb, hb_temp, p.hidden_dim);
+
+            // Final FFN matmul with SVD-aware multiplication
+            if (layer.w2_svd != null && layer.w2_svd.use_svd) {
+                math.MatMulSVD (s.xb, hb_temp, layer.w2_svd);
+            } else {
+                math.MatMul (s.xb, s.hb, layer.w2);
+            }
 
             // Residual connection
             for (var i = 0; i < dim; i++) {

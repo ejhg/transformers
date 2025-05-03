@@ -2,7 +2,7 @@ namespace llama.cs;
 
 public class BinModelLoader
 {
-    public static (config config, weights weights) load (string checkpoint) {
+    public static (config config, weights weights) load (string checkpoint, bool useSVD = true) {
         using FileStream fs = new FileStream (checkpoint, FileMode.Open, FileAccess.Read);
         using BinaryReader br = new BinaryReader (fs);
 
@@ -30,6 +30,12 @@ public class BinModelLoader
 
         // Map weights
         var weights = MemoryMapWeights (config, data, shared_weights);
+        
+        // Apply SVD decomposition to large matrices if requested
+        if (useSVD) {
+            Console.WriteLine("Applying SVD decomposition to model weights...");
+            ModelSVDDecomposer.DecomposeMatrices(weights, config);
+        }
 
         return (config, weights);
     }
@@ -63,7 +69,15 @@ public class BinModelLoader
                 rms_ffn_weight = new float[p.dim],
                 w1 = new float[p.hidden_dim, p.dim],
                 w2 = new float[p.dim, p.hidden_dim],
-                w3 = new float[p.hidden_dim, p.dim]
+                w3 = new float[p.hidden_dim, p.dim],
+                // Initialize SVD matrices as not-used by default
+                wq_svd = new weights.SVDMatrix { use_svd = false },
+                wk_svd = new weights.SVDMatrix { use_svd = false },
+                wv_svd = new weights.SVDMatrix { use_svd = false },
+                wo_svd = new weights.SVDMatrix { use_svd = false },
+                w1_svd = new weights.SVDMatrix { use_svd = false },
+                w2_svd = new weights.SVDMatrix { use_svd = false },
+                w3_svd = new weights.SVDMatrix { use_svd = false }
             };
         }
 

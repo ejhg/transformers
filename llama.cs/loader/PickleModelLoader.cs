@@ -8,7 +8,8 @@ public class PickleModelLoader
 {
     public static (config config, weights weights) load (
         string paramJsonPath,
-        string modelWeightPath
+        string modelWeightPath,
+        bool useSVD = true
     ) {
         var json = JsonSerializer.Deserialize<ConfigurationParamsJson> (File.ReadAllText (paramJsonPath));
 
@@ -76,7 +77,15 @@ public class PickleModelLoader
                 rms_ffn_weight = new float[p.dim],
                 w1 = new float[p.hidden_dim, p.dim],
                 w2 = new float[p.dim, p.hidden_dim],
-                w3 = new float[p.hidden_dim, p.dim]
+                w3 = new float[p.hidden_dim, p.dim],
+                // Initialize SVD matrices as not-used by default
+                wq_svd = new weights.SVDMatrix { use_svd = false },
+                wk_svd = new weights.SVDMatrix { use_svd = false },
+                wv_svd = new weights.SVDMatrix { use_svd = false },
+                wo_svd = new weights.SVDMatrix { use_svd = false },
+                w1_svd = new weights.SVDMatrix { use_svd = false },
+                w2_svd = new weights.SVDMatrix { use_svd = false },
+                w3_svd = new weights.SVDMatrix { use_svd = false }
             };
         }
 
@@ -218,6 +227,12 @@ public class PickleModelLoader
         }
 
         fileStream.Close ();
+        
+        // Apply SVD decomposition to large matrices if requested
+        if (useSVD) {
+            Console.WriteLine("Applying SVD decomposition to model weights...");
+            ModelSVDDecomposer.DecomposeMatrices(w, p);
+        }
 
         return (p, w);
     }

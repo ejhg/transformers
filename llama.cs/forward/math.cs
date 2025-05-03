@@ -74,6 +74,7 @@ public class math
 
     /**
      * W (m,n) @ x (n,) -> xout (m,)
+     * Standard matrix multiplication
      */
     public static unsafe void MatMul (float[] xout, float[] x, float[,] W) {
         if (x.Length > 1000) {
@@ -108,6 +109,75 @@ public class math
             }
         }
     }
+    
+    /**
+     * SVD Matrix multiplication: (U * diag(S) * Vt) @ x = U * (diag(S) * (Vt @ x))
+     * This computes the matrix multiplication using the decomposed form,
+     * which is more efficient for large matrices with low rank decomposition.
+     */
+    public static void MatMulSVD(float[] xout, float[] x, weights.SVDMatrix svdMatrix) {
+        if (!svdMatrix.use_svd || svdMatrix.U == null || svdMatrix.S == null || svdMatrix.Vt == null) {
+            // Fall back to standard matrix multiplication if not using SVD or any component is null
+            if (svdMatrix.original != null) {
+                MatMul(xout, x, svdMatrix.original);
+            } else {
+                // This should never happen if properly initialized
+                throw new InvalidOperationException("SVD matrix is not properly initialized");
+            }
+            return;
+        }
+        
+        var rank = svdMatrix.rank;
+        var rows = svdMatrix.U.GetLength(0);
+        var cols = svdMatrix.Vt.GetLength(1);
+        
+        // Step 1: Compute Vt @ x (resulting in a vector of size rank)
+        var temp = new float[rank];
+        
+        if (cols > 1000) {
+            Parallel.For(0, rank, i => {
+                float sum = 0.0f;
+                for (int j = 0; j < cols; j++) {
+                    sum += svdMatrix.Vt[i, j] * x[j];
+                }
+                temp[i] = sum;
+            });
+        } else {
+            for (int i = 0; i < rank; i++) {
+                float sum = 0.0f;
+                for (int j = 0; j < cols; j++) {
+                    sum += svdMatrix.Vt[i, j] * x[j];
+                }
+                temp[i] = sum;
+            }
+        }
+        
+        // Step 2: Scale by singular values
+        for (int i = 0; i < rank; i++) {
+            temp[i] *= svdMatrix.S[i];
+        }
+        
+        // Step 3: Compute U @ (diag(S) * (Vt @ x))
+        if (rows > 1000) {
+            Parallel.For(0, rows, i => {
+                float sum = 0.0f;
+                for (int j = 0; j < rank; j++) {
+                    sum += svdMatrix.U[i, j] * temp[j];
+                }
+                xout[i] = sum;
+            });
+        } else {
+            for (int i = 0; i < rows; i++) {
+                float sum = 0.0f;
+                for (int j = 0; j < rank; j++) {
+                    sum += svdMatrix.U[i, j] * temp[j];
+                }
+                xout[i] = sum;
+            }
+        }
+    }
+    
+    // Removed the MatMul with SVDMatrix overload - we'll call MatMulSVD directly
 
     public static unsafe void MatMul (float[,] xout, float[] x, float[,] W) {
         var out_size = xout.GetLength (1);
