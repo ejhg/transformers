@@ -1,6 +1,6 @@
 using transformers.utils;
 
-namespace mingpt3;
+namespace mingpt.cs;
 
 static class mingpt_train
 {

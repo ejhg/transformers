@@ -1,4 +1,4 @@
-﻿using mingpt3;
+﻿using mingpt.cs;
 using transformers.entrypoints;
 
 var command = args[0];

@@ -1,4 +1,4 @@
-using mingpt3;
+using mingpt.cs;
 
 namespace transformers.utils;
 

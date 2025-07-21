@@ -1,4 +1,4 @@
-namespace mingpt3;
+namespace mingpt.cs;
 
 public class LayerNorm
 {

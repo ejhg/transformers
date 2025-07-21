@@ -1,4 +1,4 @@
-namespace mingpt3;
+namespace mingpt.cs;
 
 /**
  * https://chatgpt.com/share/67084674-24ec-8009-b7e1-6e45002c5f96
