@@ -5,6 +5,7 @@
         <ImplicitUsings>enable</ImplicitUsings>
         <Nullable>enable</Nullable>
         <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+        <NoWarn>CS8632;CS8981;CS3021;CS8509;CS0612;CS0618;CS8524;CS0649;CS8123;CS8601;CS8618</NoWarn>
     </PropertyGroup>
 
     <!-- Configuration specific settings -->

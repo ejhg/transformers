@@ -13,6 +13,8 @@ if (command.StartsWith ("llama.cs:")) {
     llama_touchsharp.run (command);
 } else if (command.StartsWith ("mingpt:train")) {
     mingpt_train.run (command);
+} else if (command.StartsWith ("mingpt.torchsharp:")) {
+    mingpt_torchsharp.run (command);
 }
 
 Console.WriteLine ("done");
