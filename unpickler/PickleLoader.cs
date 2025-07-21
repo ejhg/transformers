@@ -1,4 +1,4 @@
-namespace llama.cs.reference;
+namespace llama.cs;
 
 static class PickleLoader
 {
