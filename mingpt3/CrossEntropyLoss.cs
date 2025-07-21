@@ -26,7 +26,7 @@ static class CrossEntropyLoss
 
             // Compute gradient
             for (int j = 0; j < vocabSize; j++) {
-                grad.Data[i, j] = Math.Exp (logits.Data[i, j] - (maxLogit + Math.Log (sumExp))) / sumExp;
+                grad.Data[i, j] = Math.Exp (logits.Data[i, j] - maxLogit) / sumExp;
             }
 
             grad.Data[i, targetIds[i]] -= 1.0;

@@ -6,7 +6,7 @@ public class MultiHeadSelfAttention
     public Matrix Wq, Wk, Wv, Wo;
     public Matrix GradWq, GradWk, GradWv, GradWo;
 
-    private Matrix Q, K, V, AttentionOutput;
+    private Matrix Q, K, V, AttentionOutput, Input;
     private Matrix[] Q_heads, K_heads, V_heads, AttnWeights, HeadOutputs;
 
     public MultiHeadSelfAttention (int embeddingSize, int numHeads) {
@@ -26,6 +26,7 @@ public class MultiHeadSelfAttention
     }
 
     public Matrix Forward (Matrix x) {
+        Input = x;
         Q = x * Wq;
         K = x * Wk;
         V = x * Wv;
@@ -81,9 +82,9 @@ public class MultiHeadSelfAttention
         }
 
         // Backprop through Wq, Wk, Wv
-        GradWq += Q.Transpose () * dQ;
-        GradWk += K.Transpose () * dK;
-        GradWv += V.Transpose () * dV;
+        GradWq += Input.Transpose () * dQ;
+        GradWk += Input.Transpose () * dK;
+        GradWv += Input.Transpose () * dV;
 
         var dInput = dQ * Wq.Transpose () + dK * Wk.Transpose () + dV * Wv.Transpose ();
 

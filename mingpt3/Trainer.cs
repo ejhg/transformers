@@ -18,11 +18,12 @@ static class Trainer
 
                 var dLogitsBatch = CrossEntropyLoss.ComputeLoss (logitsBatch, document.targets, out var loss);
 
-                totalLoss += loss / batchSize;
+                totalLoss += loss;
 
                 model.Backward (dLogitsBatch, document.tokens);
             }
 
+            totalLoss /= batchSize;
             optimizer.Step (model);
 
 
