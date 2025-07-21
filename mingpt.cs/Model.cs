@@ -9,6 +9,7 @@ public class Model
     public EmbeddingLayer TokenEmbedding;
     public PositionalEncoding PositionalEmbedding;
     public TransformerBlock[] Layers;
+    public LayerNorm FinalLayerNorm;
     public LinearLayer FinalLayer;
     public bool Training { get; set; } = true;
     public double DropoutRate { get; set; } = 0.1;
@@ -25,7 +26,8 @@ public class Model
         Layers = new TransformerBlock[numLayers];
         for (int i = 0; i < numLayers; i++)
             Layers[i] = new TransformerBlock (embeddingSize, numHeads);
-        FinalLayer = new LinearLayer (embeddingSize, vocabSize);
+        FinalLayerNorm = new LayerNorm(embeddingSize);
+        FinalLayer = new LinearLayer (embeddingSize, vocabSize, useBias: false); // GPT-2 style: no bias in final layer
     }
 
     public Matrix Forward (int[] batchInputIds) {
@@ -49,6 +51,7 @@ public class Model
             x = layer.Forward (x);
         }
 
+        x = FinalLayerNorm.Forward(x);
         x = FinalLayer.Forward (x);
 
         return x; // Returns logits
@@ -57,6 +60,9 @@ public class Model
     public void Backward (Matrix dLogits, int[] batchInputIds) {
         // Backward through final linear layer
         var dX = FinalLayer.Backward (dLogits);
+        
+        // Backward through final layer norm
+        dX = FinalLayerNorm.Backward(dX);
 
         // Backward through transformer layers
         for (int i = Layers.Length - 1; i >= 0; i--) {

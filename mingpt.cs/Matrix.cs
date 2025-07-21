@@ -31,6 +31,52 @@ public class Matrix
         return m;
     }
 
+    /// <summary>
+    /// Initialize weights with normal distribution (mean=0, std=0.02) like GPT-2
+    /// </summary>
+    public static Matrix RandomNormal(int rows, int cols, double mean = 0.0, double std = 0.02)
+    {
+        var m = new Matrix(rows, cols);
+        var rand = new Random();
+        
+        for (int i = 0; i < rows; i++)
+        {
+            for (int j = 0; j < cols; j++)
+            {
+                // Box-Muller transform for normal distribution
+                double u1 = 1.0 - rand.NextDouble(); // uniform(0,1] 
+                double u2 = 1.0 - rand.NextDouble();
+                double randStdNormal = Math.Sqrt(-2.0 * Math.Log(u1)) * Math.Sin(2.0 * Math.PI * u2);
+                m.Data[i, j] = mean + std * randStdNormal;
+            }
+        }
+        return m;
+    }
+
+    /// <summary>
+    /// Initialize weights with zeros
+    /// </summary>
+    public static Matrix Zeros(int rows, int cols)
+    {
+        return new Matrix(rows, cols); // Already initialized to zeros
+    }
+
+    /// <summary>
+    /// Initialize weights with ones
+    /// </summary>
+    public static Matrix Ones(int rows, int cols)
+    {
+        var m = new Matrix(rows, cols);
+        for (int i = 0; i < rows; i++)
+        {
+            for (int j = 0; j < cols; j++)
+            {
+                m.Data[i, j] = 1.0;
+            }
+        }
+        return m;
+    }
+
     public Matrix Transpose () {
         var result = new Matrix (Cols, Rows);
         for (int i = 0; i < Rows; i++)

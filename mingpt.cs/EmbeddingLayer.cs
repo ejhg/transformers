@@ -9,7 +9,7 @@ public class EmbeddingLayer
     public EmbeddingLayer (int vocabSize, int embeddingSize) {
         VocabSize = vocabSize;
         EmbeddingSize = embeddingSize;
-        Weights = Matrix.Random (vocabSize, embeddingSize);
+        Weights = Matrix.RandomNormal (vocabSize, embeddingSize);
         GradWeights = new Matrix (vocabSize, embeddingSize);
     }
 

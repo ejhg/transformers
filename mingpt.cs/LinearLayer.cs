@@ -8,28 +8,31 @@ public class LinearLayer
     public Matrix GradBias;
     private Matrix Input;
 
-    public LinearLayer (int inputSize, int outputSize) {
-        Weights = Matrix.Random (inputSize, outputSize);
-        Bias = new Matrix (1, outputSize);
+    public LinearLayer (int inputSize, int outputSize, bool useBias = true) {
+        Weights = Matrix.RandomNormal (inputSize, outputSize);
+        Bias = useBias ? Matrix.Zeros(1, outputSize) : null;
         GradWeights = new Matrix (inputSize, outputSize);
-        GradBias = new Matrix (1, outputSize);
+        GradBias = useBias ? new Matrix (1, outputSize) : null;
     }
 
     public Matrix Forward (Matrix input) {
         Input = input;
-        return (input * Weights) + Bias;
+        return Bias != null ? (input * Weights) + Bias : input * Weights;
     }
 
     public Matrix Backward (Matrix dOutput) {
         GradWeights += Input.Transpose () * dOutput;
-        GradBias += dOutput.SumRows ();
+        if (GradBias != null)
+            GradBias += dOutput.SumRows ();
         return dOutput * Weights.Transpose ();
     }
 
     public void UpdateParameters (double LearningRate) {
         Weights -= LearningRate * GradWeights;
-        Bias -= LearningRate * GradBias;
+        if (Bias != null)
+            Bias -= LearningRate * GradBias;
         GradWeights.Clear ();
-        GradBias.Clear ();
+        if (GradBias != null)
+            GradBias.Clear ();
     }
 }

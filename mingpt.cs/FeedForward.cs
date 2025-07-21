@@ -17,14 +17,14 @@ public class FeedForward
 
     public Matrix Forward (Matrix x) {
         Hidden = Linear1.Forward (x);
-        Hidden = new Matrix (math.Relu (Hidden.Data));
+        Hidden = new Matrix (NewGelu.Forward (Hidden.Data));
         Hidden = Dropout.Apply (Hidden, DropoutRate, Training);
         return Linear2.Forward (Hidden);
     }
 
     public Matrix Backward (Matrix dOutput) {
         var dHidden = Linear2.Backward (dOutput);
-        dHidden = new Matrix (math.ReluBackward (Hidden.Data, dHidden));
+        dHidden = new Matrix (NewGelu.Backward (Hidden.Data, dHidden.Data));
         return Linear1.Backward (dHidden);
     }
 }

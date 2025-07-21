@@ -8,6 +8,8 @@ public class MultiHeadSelfAttention
 
     private Matrix Q, K, V, AttentionOutput, Input;
     private Matrix[] Q_heads, K_heads, V_heads, AttnWeights, HeadOutputs;
+    private Matrix CausalMask; // Pre-computed causal mask buffer
+    private int MaxSeqLen;
     public double DropoutRate { get; set; } = 0.1;
     public bool Training { get; set; } = true;
 
@@ -16,10 +18,10 @@ public class MultiHeadSelfAttention
         NumHeads = numHeads;
         HeadSize = embeddingSize / numHeads;
 
-        Wq = Matrix.Random (embeddingSize, embeddingSize);
-        Wk = Matrix.Random (embeddingSize, embeddingSize);
-        Wv = Matrix.Random (embeddingSize, embeddingSize);
-        Wo = Matrix.Random (embeddingSize, embeddingSize);
+        Wq = Matrix.RandomNormal (embeddingSize, embeddingSize);
+        Wk = Matrix.RandomNormal (embeddingSize, embeddingSize);
+        Wv = Matrix.RandomNormal (embeddingSize, embeddingSize);
+        Wo = Matrix.RandomNormal (embeddingSize, embeddingSize);
 
         GradWq = new Matrix (embeddingSize, embeddingSize);
         GradWk = new Matrix (embeddingSize, embeddingSize);
