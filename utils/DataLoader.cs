@@ -2,8 +2,13 @@ namespace transformers.utils;
 
 static class DataLoader
 {
-    public static Func<(int[], int[])> LoadData (int sequenceLength, out int vocabularySize, out char[] vocabulary) {
-        var text = File.ReadAllText ("resources/tinyshakespeare.txt");
+    public static Func<(int[], int[])> LoadData (
+        int sequenceLength,
+        out int vocabularySize,
+        out char[] vocabulary,
+        string sourceFile
+    ) {
+        var text = File.ReadAllText (sourceFile);
         var sourceCharacters = text.ToArray ();
 
         var _vocabulary = sourceCharacters

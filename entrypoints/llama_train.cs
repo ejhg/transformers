@@ -11,7 +11,11 @@ static class Entrypoint
         int maxSeqLen = 32;
         int batchSize = 64;
 
-        var data = DataLoader.LoadData (maxSeqLen, out var vocabSize, out var vocabulary);
+        var data = DataLoader.LoadData (
+            maxSeqLen,
+            out var vocabSize,
+            out var vocabulary,
+            "resources/tinyshakespeare.txt");
 
         var model = new LlamaForCausalLM (
             vocabSize: vocabSize,

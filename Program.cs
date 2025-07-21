@@ -1,4 +1,5 @@
-﻿using transformers.entrypoints;
+﻿using mingpt3;
+using transformers.entrypoints;
 
 var command = args[0];
 
@@ -10,6 +11,8 @@ if (command.StartsWith ("llama.cs:")) {
     llama_cs_svd.run (command);
 } else if (command.StartsWith ("llama.torchsharp:")) {
     llama_touchsharp.run (command);
+} else if (command.StartsWith ("mingpt:train")) {
+    mingpt_train.run (command);
 }
 
 Console.WriteLine ("done");
