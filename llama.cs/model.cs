@@ -1,4 +1,4 @@
-namespace llama.cs;
+namespace llama.cs.svd;
 
 public class model
 {

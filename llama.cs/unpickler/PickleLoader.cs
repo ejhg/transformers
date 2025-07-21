@@ -1,4 +1,4 @@
-namespace llama.unpickler;
+namespace llama.unpickler.svd;
 
 static class PickleLoader
 {

@@ -1,4 +1,4 @@
-namespace llama.cs;
+namespace llama.cs.svd;
 
 /**
  * The sampler takes in logits and returns a sampled token

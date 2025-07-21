@@ -1,4 +1,4 @@
-namespace llama.cs;
+namespace llama.cs.svd;
 
 public class BinModelLoader
 {
@@ -30,7 +30,7 @@ public class BinModelLoader
 
         // Map weights
         var weights = MemoryMapWeights (config, data, shared_weights);
-        
+
         // Apply SVD decomposition to large matrices if requested
         if (useSVD) {
             Console.WriteLine("Applying SVD decomposition to model weights...");

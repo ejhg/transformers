@@ -1,11 +1,39 @@
-﻿using llama.torchsharp.tokenizer.llama2;
+using llama.torchsharp;
+using llama.torchsharp.tokenizer.llama2;
 using llama.torchsharp.tokenizer.llama3;
 using TorchSharp;
 
-namespace llama.torchsharp;
+namespace transformers.entrypoints;
 
-static class Entrypoint
+public class llama_touchsharp
 {
+    public static void run (string command) {
+        var HOME = Environment.GetFolderPath (Environment.SpecialFolder.UserProfile);
+
+        switch (command) {
+            case "llama.torchsharp:llama-3.2-1b-instruct":
+                run (
+                    HOME + "/llama/llama-3.2-1b-instruct",
+                    "llama.torchsharp/resources",
+                    weightsFile: "consolidated.00.pth",
+                    prompt: "I believe the meaning of life is");
+                break;
+
+            case "llama.torchsharp:stories-15m":
+                run (
+                    HOME + "/llama/stories-15m",
+                    "llama.torchsharp/resources", // TODO
+                    weightsFile: "stories15M.pth",
+                    prompt: "Once upon a time");
+                break;
+
+            default:
+                throw new NotSupportedException (command);
+        }
+
+        Console.WriteLine ("done");
+    }
+
     public static void run (
         string weightsDir,
         string llamaResourcesDir,

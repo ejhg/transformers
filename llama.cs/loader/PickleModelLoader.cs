@@ -1,8 +1,8 @@
+using llama.cs.reference;
 using llama.torchsharp;
-using llama.unpickler;
 using System.Text.Json;
 
-namespace llama.cs;
+namespace llama.cs.svd;
 
 public class PickleModelLoader
 {
@@ -227,7 +227,7 @@ public class PickleModelLoader
         }
 
         fileStream.Close ();
-        
+
         // Apply SVD decomposition to large matrices if requested
         if (useSVD) {
             Console.WriteLine("Applying SVD decomposition to model weights...");

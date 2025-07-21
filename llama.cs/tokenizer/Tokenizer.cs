@@ -1,7 +1,7 @@
 using llama.torchsharp;
 using System.Text;
 
-namespace llama.cs;
+namespace llama.cs.svd;
 
 /**
  * The Byte Pair Encoding (BPE) Tokenizer that translates strings <-> tokens

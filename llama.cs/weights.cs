@@ -1,4 +1,4 @@
-namespace llama.cs;
+namespace llama.cs.svd;
 
 public class weights
 {
@@ -15,11 +15,11 @@ public class weights
         public float[]? S = null; // Singular values [rank]
         public float[,]? Vt = null; // Right singular vectors (transposed) [rank, cols]
         public float[,]? original = null; // Original matrix - could be set to null after decomposition to save memory
-        
+
         // Statistics for performance tuning
         public float error_ratio = 0.0f; // Error ratio compared to original matrix
     }
-    
+
     public class LayerWeights
     {
         // Weights for RMSNorms
@@ -29,23 +29,23 @@ public class weights
         // Weights for matmuls. note dim == n_heads * head_size
         public float[,] wq; // [n_heads * head_size][dim]
         public SVDMatrix wq_svd;
-        
+
         public float[,] wk; // [n_kv_heads * head_size][dim]
         public SVDMatrix wk_svd;
-        
+
         public float[,] wv; // [n_kv_heads * head_size][dim]
         public SVDMatrix wv_svd;
-        
+
         public float[,] wo; // [dim][n_heads * head_size]
         public SVDMatrix wo_svd;
 
         // Weights for FFN
         public float[,] w1; // [hidden_dim][dim]
         public SVDMatrix w1_svd;
-        
+
         public float[,] w2; // [dim][hidden_dim]
         public SVDMatrix w2_svd;
-        
+
         public float[,] w3; // [hidden_dim][dim]
         public SVDMatrix w3_svd;
     }

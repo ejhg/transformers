@@ -3,7 +3,7 @@ using Razorvine.Pickle.Objects;
 using System.Collections;
 using System.IO.Compression;
 
-namespace llama.unpickler;
+namespace llama.unpickler.svd;
 
 public static class DelayedExecutionUnpickler
 {

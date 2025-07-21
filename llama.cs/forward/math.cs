@@ -1,4 +1,4 @@
-namespace llama.cs;
+namespace llama.cs.svd;
 
 public class math
 {
@@ -109,7 +109,7 @@ public class math
             }
         }
     }
-    
+
     /**
      * SVD Matrix multiplication: (U * diag(S) * Vt) @ x = U * (diag(S) * (Vt @ x))
      * This computes the matrix multiplication using the decomposed form,
@@ -126,14 +126,14 @@ public class math
             }
             return;
         }
-        
+
         var rank = svdMatrix.rank;
         var rows = svdMatrix.U.GetLength(0);
         var cols = svdMatrix.Vt.GetLength(1);
-        
+
         // Step 1: Compute Vt @ x (resulting in a vector of size rank)
         var temp = new float[rank];
-        
+
         if (cols > 1000) {
             Parallel.For(0, rank, i => {
                 float sum = 0.0f;
@@ -151,12 +151,12 @@ public class math
                 temp[i] = sum;
             }
         }
-        
+
         // Step 2: Scale by singular values
         for (int i = 0; i < rank; i++) {
             temp[i] *= svdMatrix.S[i];
         }
-        
+
         // Step 3: Compute U @ (diag(S) * (Vt @ x))
         if (rows > 1000) {
             Parallel.For(0, rows, i => {
@@ -176,7 +176,7 @@ public class math
             }
         }
     }
-    
+
     /**
      * Matrix multiplication for 2D output matrices, with support for SVD decomposition
      * This handles the attention query, key, and value projections
@@ -187,23 +187,23 @@ public class math
             MatMul(xout, x, W);
             return;
         }
-        
+
         var rank = svdMatrix.rank;
         var rows = svdMatrix.U.GetLength(0);
         var cols = svdMatrix.Vt.GetLength(1);
         var out_rows = xout.GetLength(0);
         var out_cols = xout.GetLength(1);
-        
+
         // Check if rows match the expected output dimensions
         if (rows != out_rows * out_cols) {
             // Dimensions don't match, fall back to standard implementation
             MatMul(xout, x, W);
             return;
         }
-        
+
         // Step 1: Compute Vt @ x (resulting in a vector of size rank)
         var temp = new float[rank];
-        
+
         if (cols > 1000) {
             Parallel.For(0, rank, i => {
                 float sum = 0.0f;
@@ -221,12 +221,12 @@ public class math
                 temp[i] = sum;
             }
         }
-        
+
         // Step 2: Scale by singular values
         for (int i = 0; i < rank; i++) {
             temp[i] *= svdMatrix.S[i];
         }
-        
+
         // Step 3: Compute U @ (diag(S) * (Vt @ x)) and reshape to 2D output
         if (rows > 1000) {
             Parallel.For(0, rows, i => {
@@ -234,7 +234,7 @@ public class math
                 for (int j = 0; j < rank; j++) {
                     sum += svdMatrix.U[i, j] * temp[j];
                 }
-                
+
                 int row = i / out_cols;
                 int col = i % out_cols;
                 xout[row, col] = sum;
@@ -245,7 +245,7 @@ public class math
                 for (int j = 0; j < rank; j++) {
                     sum += svdMatrix.U[i, j] * temp[j];
                 }
-                
+
                 int row = i / out_cols;
                 int col = i % out_cols;
                 xout[row, col] = sum;

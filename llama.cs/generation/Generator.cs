@@ -1,6 +1,6 @@
 using llama.torchsharp;
 
-namespace llama.cs;
+namespace llama.cs.svd;
 
 public class Generator
 {
