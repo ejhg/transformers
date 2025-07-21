@@ -46,6 +46,7 @@ public class Model
             .ToArray ());
 
         var x = tokenEmb + posEmb;
+        x = Dropout.Apply(x, DropoutRate, Training);
 
         foreach (var layer in Layers) {
             x = layer.Forward (x);
@@ -60,7 +61,7 @@ public class Model
     public void Backward (Matrix dLogits, int[] batchInputIds) {
         // Backward through final linear layer
         var dX = FinalLayer.Backward (dLogits);
-        
+
         // Backward through final layer norm
         dX = FinalLayerNorm.Backward(dX);
 
