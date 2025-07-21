@@ -8,6 +8,8 @@ public class MultiHeadSelfAttention
 
     private Matrix Q, K, V, AttentionOutput, Input;
     private Matrix[] Q_heads, K_heads, V_heads, AttnWeights, HeadOutputs;
+    public double DropoutRate { get; set; } = 0.1;
+    public bool Training { get; set; } = true;
 
     public MultiHeadSelfAttention (int embeddingSize, int numHeads) {
         EmbeddingSize = embeddingSize;
@@ -40,7 +42,9 @@ public class MultiHeadSelfAttention
 
         for (int i = 0; i < NumHeads; i++) {
             var scores = (Q_heads[i] * K_heads[i].Transpose ()) / Math.Sqrt (HeadSize);
+            ApplyCausalMask (scores);
             var attn_weights = Softmax (scores);
+            attn_weights = Dropout.Apply (attn_weights, DropoutRate, Training);
             var attn_output = attn_weights * V_heads[i];
 
             AttnWeights[i] = attn_weights;
@@ -155,5 +159,13 @@ public class MultiHeadSelfAttention
         }
 
         return result;
+    }
+
+    private void ApplyCausalMask (Matrix scores) {
+        for (int i = 0; i < scores.Rows; i++) {
+            for (int j = i + 1; j < scores.Cols; j++) {
+                scores.Data[i, j] = double.NegativeInfinity;
+            }
+        }
     }
 }

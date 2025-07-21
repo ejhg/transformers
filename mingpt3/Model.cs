@@ -7,11 +7,13 @@ public class Model
 {
     public int VocabSize, EmbeddingSize, NumHeads, NumLayers, MaxSeqLen;
     public EmbeddingLayer TokenEmbedding;
-    public EmbeddingLayer PositionalEmbedding;
+    public PositionalEncoding PositionalEmbedding;
     public TransformerBlock[] Layers;
     public LinearLayer FinalLayer;
+    public bool Training { get; set; } = true;
+    public double DropoutRate { get; set; } = 0.1;
 
-    public Model (int vocabSize, int embeddingSize, int numHeads, int numLayers, int maxSeqLen) {
+    public Model (int vocabSize, int embeddingSize, int numHeads, int numLayers, int maxSeqLen, PositionalEncodingType positionType = PositionalEncodingType.Learnable) {
         VocabSize = vocabSize;
         EmbeddingSize = embeddingSize;
         NumHeads = numHeads;
@@ -19,7 +21,7 @@ public class Model
         MaxSeqLen = maxSeqLen;
 
         TokenEmbedding = new EmbeddingLayer (vocabSize, embeddingSize);
-        PositionalEmbedding = new EmbeddingLayer (maxSeqLen, embeddingSize);
+        PositionalEmbedding = new PositionalEncoding (maxSeqLen, embeddingSize, positionType);
         Layers = new TransformerBlock[numLayers];
         for (int i = 0; i < numLayers; i++)
             Layers[i] = new TransformerBlock (embeddingSize, numHeads);
@@ -27,6 +29,14 @@ public class Model
     }
 
     public Matrix Forward (int[] batchInputIds) {
+        // Update training mode and dropout rate for all layers
+        foreach (var layer in Layers) {
+            layer.SelfAttention.Training = Training;
+            layer.SelfAttention.DropoutRate = DropoutRate;
+            layer.FFN.Training = Training;
+            layer.FFN.DropoutRate = DropoutRate;
+        }
+
         var tokenEmb = TokenEmbedding.Forward (batchInputIds);
         var posEmb = PositionalEmbedding.Forward (Enumerable
             .Range (0, batchInputIds.Length)

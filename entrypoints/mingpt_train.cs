@@ -13,7 +13,8 @@ static class mingpt_train
         int numHeads = 6;
         int numLayers = 4;
         int maxSeqLen = 16;
-        int batchSize = 64;
+        int batchSize = 32;
+        double dropout = 0.1;
 
         var data = DataLoader.LoadData (
             maxSeqLen,
@@ -21,7 +22,8 @@ static class mingpt_train
             out var vocabulary,
             sourceFile);
 
-        var model = new Model (vocabSize, embeddingSize, numHeads, numLayers, maxSeqLen);
+        var model = new Model (vocabSize, embeddingSize, numHeads, numLayers, maxSeqLen, PositionalEncodingType.Sinusoidal);
+        model.DropoutRate = dropout;
         var optimizer = new Optimizer (learningRate: 0.0005);
 
         Trainer.train (
