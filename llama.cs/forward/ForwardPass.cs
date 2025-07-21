@@ -21,11 +21,10 @@ static class ForwardPass
             // Attention rmsnorm
             math.RmsNorm (s.xb, s.x, layer.rms_att_weight);
 
-            // Compute q, k, v with regular matrix multiplications
-            // We can't use the SVD version here because these are 2D output matrices
-            math.MatMul (s.q, s.xb, layer.wq);
-            math.MatMul (s.k, s.xb, layer.wk);
-            math.MatMul (s.v, s.xb, layer.wv);
+            // Compute q, k, v with SVD-aware matrix multiplications for 2D outputs
+            math.MatMul2D (s.q, s.xb, layer.wq, layer.wq_svd);
+            math.MatMul2D (s.k, s.xb, layer.wk, layer.wk_svd);
+            math.MatMul2D (s.v, s.xb, layer.wv, layer.wv_svd);
 
             // RoPE positional encoding
             for (var i = 0; i < dim; i += 2) {

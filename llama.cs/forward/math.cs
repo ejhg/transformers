@@ -177,7 +177,81 @@ public class math
         }
     }
     
-    // Removed the MatMul with SVDMatrix overload - we'll call MatMulSVD directly
+    /**
+     * Matrix multiplication for 2D output matrices, with support for SVD decomposition
+     * This handles the attention query, key, and value projections
+     */
+    public static void MatMul2D(float[,] xout, float[] x, float[,] W, weights.SVDMatrix svdMatrix) {
+        if (svdMatrix == null || !svdMatrix.use_svd || svdMatrix.U == null || svdMatrix.S == null || svdMatrix.Vt == null) {
+            // If SVD isn't being used, fall back to standard implementation
+            MatMul(xout, x, W);
+            return;
+        }
+        
+        var rank = svdMatrix.rank;
+        var rows = svdMatrix.U.GetLength(0);
+        var cols = svdMatrix.Vt.GetLength(1);
+        var out_rows = xout.GetLength(0);
+        var out_cols = xout.GetLength(1);
+        
+        // Check if rows match the expected output dimensions
+        if (rows != out_rows * out_cols) {
+            // Dimensions don't match, fall back to standard implementation
+            MatMul(xout, x, W);
+            return;
+        }
+        
+        // Step 1: Compute Vt @ x (resulting in a vector of size rank)
+        var temp = new float[rank];
+        
+        if (cols > 1000) {
+            Parallel.For(0, rank, i => {
+                float sum = 0.0f;
+                for (int j = 0; j < cols; j++) {
+                    sum += svdMatrix.Vt[i, j] * x[j];
+                }
+                temp[i] = sum;
+            });
+        } else {
+            for (int i = 0; i < rank; i++) {
+                float sum = 0.0f;
+                for (int j = 0; j < cols; j++) {
+                    sum += svdMatrix.Vt[i, j] * x[j];
+                }
+                temp[i] = sum;
+            }
+        }
+        
+        // Step 2: Scale by singular values
+        for (int i = 0; i < rank; i++) {
+            temp[i] *= svdMatrix.S[i];
+        }
+        
+        // Step 3: Compute U @ (diag(S) * (Vt @ x)) and reshape to 2D output
+        if (rows > 1000) {
+            Parallel.For(0, rows, i => {
+                float sum = 0.0f;
+                for (int j = 0; j < rank; j++) {
+                    sum += svdMatrix.U[i, j] * temp[j];
+                }
+                
+                int row = i / out_cols;
+                int col = i % out_cols;
+                xout[row, col] = sum;
+            });
+        } else {
+            for (int i = 0; i < rows; i++) {
+                float sum = 0.0f;
+                for (int j = 0; j < rank; j++) {
+                    sum += svdMatrix.U[i, j] * temp[j];
+                }
+                
+                int row = i / out_cols;
+                int col = i % out_cols;
+                xout[row, col] = sum;
+            }
+        }
+    }
 
     public static unsafe void MatMul (float[,] xout, float[] x, float[,] W) {
         var out_size = xout.GetLength (1);

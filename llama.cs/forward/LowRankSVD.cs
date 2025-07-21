@@ -112,9 +112,9 @@ public class LowRankSVD
         var rows = A.GetLength(0);
         var cols = A.GetLength(1);
         var k = S.Length;
-        
+
         float sumSquaredDiff = 0;
-        
+
         // Calculate reconstructed = U * diag(S) * Vt
         for (int i = 0; i < rows; i++) {
             for (int j = 0; j < cols; j++) {
@@ -126,28 +126,7 @@ public class LowRankSVD
                 sumSquaredDiff += diff * diff;
             }
         }
-        
+
         return MathF.Sqrt(sumSquaredDiff);
-    }
-    
-    // Helper for determining appropriate rank
-    public static int DetermineRank(float[,] A, float errorThreshold = 0.01f, int maxRank = 50) {
-        int rows = A.GetLength(0);
-        int cols = A.GetLength(1);
-        int maxPossibleRank = Math.Min(rows, cols);
-        int rank = Math.Min(maxPossibleRank, maxRank);
-        
-        // Get singular values
-        var (_, _, sigma) = PowerIteration(A);
-        float totalEnergy = sigma * sigma;  // First singular value squared
-        
-        // If the matrix is small or close to identity, no need for SVD decomposition
-        if (totalEnergy < 10.0f || rows * cols < 10000) {
-            return 0;  // Don't use SVD for this matrix
-        }
-        
-        // Start with a reasonable initial rank based on matrix size
-        int initialRank = Math.Min(Math.Max(5, (int)(Math.Min(rows, cols) * 0.1f)), rank);
-        return initialRank;
     }
 }
