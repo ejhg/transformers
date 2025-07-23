@@ -6,16 +6,7 @@ public static class Example
 {
     public static void Train (string text_file_path = "resources/tinyshakespeare.txt") {
         // Read text file
-        string text;
-        try {
-            text = File.ReadAllText (text_file_path);
-        } catch {
-            // Fallback to simple example text
-            text = "hello world this is a simple example text for training mingpt with torchsharp. " +
-                   "the quick brown fox jumps over the lazy dog. " +
-                   "this text will be used to train our language model.";
-            Console.WriteLine ("Using fallback example text");
-        }
+        var text = File.ReadAllText (text_file_path);
 
         Console.WriteLine ($"Text length: {text.Length} characters");
 
@@ -39,7 +30,7 @@ public static class Example
 
         // Create trainer configuration
         var trainer_config = Utils.GetDefaultTrainerConfig ();
-        trainer_config.max_iters = 100; // short training for demo
+        trainer_config.max_iters = 10000;
         trainer_config.batch_size = 4;
         trainer_config.learning_rate = 1e-3;
 
@@ -73,7 +64,7 @@ public static class Example
         Console.WriteLine ("\nFinal generation:");
         model.eval ();
         using (no_grad ()) {
-            var context = "hello world";
+            var context = "The ";
             var x = tensor (dataset.Encode (context), dtype: ScalarType.Int64).unsqueeze (0);
             var y = model.Generate (x, max_new_tokens: 100, temperature: 1.0, do_sample: true, top_k: 10);
             var completion = dataset.Decode (y.squeeze (0).data<long> ().Select (x => (int)x).ToArray ());

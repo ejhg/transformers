@@ -129,14 +129,13 @@ public class GPT : nn.Module<Tensor, Tensor?, (Tensor logits, Tensor? loss)>
         Tensor? loss = null;
         if (targets is not null) {
             loss = functional.cross_entropy (logits.view (-1, logits.size (-1)), targets.view (-1), ignore_index: -1);
+            loss = scope.MoveToOuter (loss);
         }
 
         return (scope.MoveToOuter (logits), loss);
     }
 
     public Tensor Generate (Tensor idx, int max_new_tokens, double temperature = 1.0, bool do_sample = false, int? top_k = null) {
-        using var scope = NewDisposeScope ();
-
         for (int i = 0; i < max_new_tokens; i++) {
             // If the sequence context is growing too long we must crop it at block_size
             var idx_cond = idx.size (1) <= this.block_size ? idx : idx.slice (1, -this.block_size, idx.size (1), 1);
@@ -145,11 +144,13 @@ public class GPT : nn.Module<Tensor, Tensor?, (Tensor logits, Tensor? loss)>
             var (logits, _) = this.forward (idx_cond);
 
             // Pluck the logits at the final step and scale by desired temperature
-            logits = logits.slice (1, -1, logits.size (1), 1) / temperature;
+            // Python: logits[:, -1, :] becomes logits.slice(1, -1, logits.size(1), 1).squeeze(1)
+            logits = logits.slice (1, -1, logits.size (1), 1).squeeze(1) / temperature;
 
             // Optionally crop the logits to only the top k options
             if (top_k.HasValue) {
                 var (v, _) = topk (logits, top_k.Value);
+                // Python: logits[logits < v[:, [-1]]] = -float('Inf')
                 logits = logits.masked_fill (logits < v.slice (-1, -1, v.size (-1), 1), double.NegativeInfinity);
             }
 
@@ -166,12 +167,9 @@ public class GPT : nn.Module<Tensor, Tensor?, (Tensor logits, Tensor? loss)>
             }
 
             // Append sampled index to the running sequence and continue
-            idx = cat (new[] {
-                idx,
-                idx_next
-            }, dim: 1);
+            idx = cat (new[] { idx, idx_next }, dim: 1);
         }
 
-        return scope.MoveToOuter (idx);
+        return idx;
     }
 }
